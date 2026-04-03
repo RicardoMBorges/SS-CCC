@@ -1,0 +1,16 @@
+sample_id,source,organism,collection,notes
+SMPL001,Plant extract,Plant_A,Collection_1,Test sample
+SMPL002,Plant extract,Plant_B,Collection_1,Test sample
+SMPL003,Fungal extract,Fungus_A,Collection_2,Test sample
+SMPL004,Bacterial culture,Bacteria_A,Collection_3,Test sample
+SMPL005,Plant extract,Plant_C,Collection_1,Test sample
+SMPL006,Marine organism,Sponge_A,Collection_4,Test sample
+SMPL007,Plant extract,Plant_D,Collection_1,Test sample
+SMPL008,Fungal extract,Fungus_B,Collection_2,Test sample
+SMPL009,Bacterial culture,Bacteria_B,Collection_3,Test sample
+SMPL010,Plant extract,Plant_E,Collection_1,Test sample
+SMPL011,Plant extract,Plant_F,Collection_1,Test sample
+SMPL012,Marine organism,Algae_A,Collection_4,Test sample
+SMPL013,Fungal extract,Fungus_C,Collection_2,Test sample
+SMPL014,Bacterial culture,Bacteria_C,Collection_3,Test sample
+SMPL015,Plant extract,Plant_G,Collection_1,Test sample
