@@ -449,7 +449,108 @@ def preprocess_matrix(df: pd.DataFrame, smooth_win: int, baseline_method: str, b
         out[c] = y
     return out
 
+def add_region_overlays(fig, regions: list[dict]):
+    for i, reg in enumerate(regions, start=1):
+        fig.add_vrect(
+            x0=reg["rt_start"],
+            x1=reg["rt_end"],
+            fillcolor="skyblue",
+            opacity=0.20,
+            line_width=0,
+            annotation_text=f"R{i}",
+            annotation_position="top left",
+        )
+    return fig
 
+
+def integrate_regions_from_df(hplc_df: pd.DataFrame, regions: list[dict]) -> pd.DataFrame:
+    """
+    Calculate AUC for each chromatogram column across user-defined RT regions.
+
+    Returns a dataframe with one row per chromatogram/sample and one column per region.
+    """
+    rt = pd.to_numeric(hplc_df["RT(min)"], errors="coerce").values
+    sample_cols = [c for c in hplc_df.columns if c != "RT(min)"]
+
+    records = []
+    for sample in sample_cols:
+        y = pd.to_numeric(hplc_df[sample], errors="coerce").values
+        row = {"HPLC_filename": sample}
+
+        total_auc = 0.0
+        for i, reg in enumerate(regions, start=1):
+            mask = (rt >= reg["rt_start"]) & (rt <= reg["rt_end"])
+            if np.sum(mask) >= 2:
+                auc = float(np.trapz(y[mask], rt[mask]))
+            else:
+                auc = np.nan
+            row[f"AUC_R{i}"] = auc
+            total_auc += 0.0 if pd.isna(auc) else auc
+
+        row["AUC_TOTAL_SELECTED"] = total_auc
+        records.append(row)
+
+    return pd.DataFrame(records)
+
+
+def merge_auc_with_metadata(auc_df: pd.DataFrame, metadata_df: pd.DataFrame) -> pd.DataFrame:
+    meta = metadata_df.copy()
+    meta["HPLC_filename"] = meta["HPLC_filename"].astype(str).str.replace(".txt", "", regex=False).str.strip()
+    auc_df = auc_df.copy()
+    auc_df["HPLC_filename"] = auc_df["HPLC_filename"].astype(str).str.replace(".txt", "", regex=False).str.strip()
+
+    merged = pd.merge(meta, auc_df, on="HPLC_filename", how="left")
+    return merged
+
+
+def calculate_keq_from_metadata(merged_auc_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Pair FI and FS using ATTRIBUTE_CCC convention:
+    e.g. S1_FI and S1_FS
+
+    Calculates both FS/FI and FI/FS for each AUC region and total selected AUC.
+    """
+    auc_cols = [c for c in merged_auc_df.columns if c.startswith("AUC_R")] + ["AUC_TOTAL_SELECTED"]
+    auc_cols = [c for c in auc_cols if c in merged_auc_df.columns]
+
+    pair_records = []
+
+    # base pair id = ATTRIBUTE_CCC without suffix _FI/_FS
+    temp = merged_auc_df.copy()
+    temp["pair_id"] = temp["ATTRIBUTE_CCC"].astype(str).str.replace("_FI", "", regex=False).str.replace("_FS", "", regex=False)
+
+    for pair_id, g in temp.groupby("pair_id"):
+        fi = g[g["ATTRIBUTE_CCC"].astype(str).str.endswith("_FI")]
+        fs = g[g["ATTRIBUTE_CCC"].astype(str).str.endswith("_FS")]
+
+        if fi.empty or fs.empty:
+            continue
+
+        fi_row = fi.iloc[0]
+        fs_row = fs.iloc[0]
+
+        out = {
+            "pair_id": pair_id,
+            "sample_id": fi_row.get("sample_id", ""),
+            "base_system": fi_row.get("base_system", ""),
+            "FI_tube_code": fi_row.get("tube_code", ""),
+            "FS_tube_code": fs_row.get("tube_code", ""),
+            "FI_file": fi_row.get("HPLC_filename", ""),
+            "FS_file": fs_row.get("HPLC_filename", ""),
+        }
+
+        for col in auc_cols:
+            fi_val = fi_row.get(col, np.nan)
+            fs_val = fs_row.get(col, np.nan)
+
+            out[f"{col}_FI"] = fi_val
+            out[f"{col}_FS"] = fs_val
+            out[f"{col}_FS_over_FI"] = fs_val / fi_val if pd.notna(fi_val) and fi_val != 0 else np.nan
+            out[f"{col}_FI_over_FS"] = fi_val / fs_val if pd.notna(fs_val) and fs_val != 0 else np.nan
+
+        pair_records.append(out)
+
+    return pd.DataFrame(pair_records)
 
 # =========================================================
 # SIDEBAR
@@ -518,7 +619,7 @@ st.markdown("---")
 # =========================================================
 # TABS
 # =========================================================
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
         "1. Sample Upload",
         "2. Solvent Systems",
@@ -526,6 +627,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         "4. Labels & Metadata",
         "5. Future OT-2 Export",
         "6. HPLC Import",
+        "7. Data Integration / Keq",
     ]
 )
 
@@ -927,6 +1029,226 @@ This imported HPLC layer will later be connected to:
                     file_name="hplc_processed_matrix.csv",
                     mime="text/csv",
                 )
+
+with tab7:
+    st.subheader("Data Integration / Keq")
+    with st.expander("What this tab does", expanded=True):
+        st.markdown(
+            """
+This tab integrates processed HPLC chromatograms with the metadata table.
+
+Workflow:
+1. Define RT regions for integration
+2. Calculate AUC for each chromatogram
+3. Merge AUC values with metadata
+4. Pair FI and FS chromatograms
+5. Calculate both:
+   - FS / FI
+   - FI / FS
+"""
+        )
+
+    processed_hplc_df = st.session_state.get("processed_hplc_tab6", None)
+
+    if processed_hplc_df is None or processed_hplc_df.empty:
+        st.info("First load and process HPLC data in tab 6.")
+    elif metadata_df is None or metadata_df.empty:
+        st.info("Metadata must be available from tab 4.")
+    else:
+        st.markdown("### 1. Region definition")
+
+        n_regions = st.number_input(
+            "Number of RT regions",
+            min_value=1,
+            max_value=20,
+            value=2,
+            step=1,
+            key="n_regions_tab7",
+        )
+
+        region_rows = []
+        for i in range(int(n_regions)):
+            c1, c2, c3 = st.columns([1, 1, 2])
+            with c1:
+                rt_start = st.number_input(
+                    f"R{i+1} start",
+                    value=float(processed_hplc_df["RT(min)"].min()),
+                    step=0.1,
+                    key=f"r{i+1}_start_tab7",
+                )
+            with c2:
+                rt_end = st.number_input(
+                    f"R{i+1} end",
+                    value=float(processed_hplc_df["RT(min)"].min()) + 1.0 + i,
+                    step=0.1,
+                    key=f"r{i+1}_end_tab7",
+                )
+            with c3:
+                label = st.text_input(
+                    f"R{i+1} label",
+                    value=f"Region_{i+1}",
+                    key=f"r{i+1}_label_tab7",
+                )
+
+            region_rows.append(
+                {
+                    "region_id": f"R{i+1}",
+                    "label": label,
+                    "rt_start": min(rt_start, rt_end),
+                    "rt_end": max(rt_start, rt_end),
+                }
+            )
+
+        regions_df = pd.DataFrame(region_rows)
+
+        with st.expander("Integration regions table", expanded=False):
+            st.dataframe(regions_df, use_container_width=True)
+
+        st.markdown("### 2. Region preview on chromatogram")
+
+        plot_df = processed_hplc_df.melt(
+            id_vars="RT(min)",
+            var_name="Sample",
+            value_name="Intensity"
+        ).dropna(subset=["Intensity"])
+
+        preview_mode = st.selectbox(
+            "Preview mode",
+            ["Overlay", "Stacked"],
+            index=0,
+            key="preview_mode_tab7",
+        )
+
+        if preview_mode == "Overlay":
+            fig_preview = px.line(
+                plot_df,
+                x="RT(min)",
+                y="Intensity",
+                color="Sample",
+                title="Chromatogram preview with integration regions"
+            )
+        else:
+            samples_sorted = sorted([c for c in processed_hplc_df.columns if c != "RT(min)"])
+            stack_step = st.number_input(
+                "Preview stack offset",
+                value=2.0,
+                step=0.5,
+                key="preview_stack_step_tab7",
+            )
+            offset_map = {s: i * stack_step for i, s in enumerate(samples_sorted)}
+            plot_df["Intensity_offset"] = plot_df.apply(
+                lambda r: r["Intensity"] + offset_map[r["Sample"]],
+                axis=1
+            )
+            fig_preview = px.line(
+                plot_df,
+                x="RT(min)",
+                y="Intensity_offset",
+                color="Sample",
+                title="Stacked chromatogram preview with integration regions"
+            )
+
+        fig_preview = add_region_overlays(fig_preview, region_rows)
+        fig_preview.update_layout(xaxis_title="RT (min)", yaxis_title="Intensity")
+        st.plotly_chart(fig_preview, use_container_width=True)
+
+        st.markdown("### 3. AUC calculation")
+        do_integrate = st.button("Calculate AUC", key="calculate_auc_tab7")
+
+        if do_integrate:
+            auc_df = integrate_regions_from_df(processed_hplc_df, region_rows)
+            st.session_state["auc_tab7"] = auc_df
+
+        auc_df = st.session_state.get("auc_tab7", None)
+
+        if auc_df is not None and not auc_df.empty:
+            with st.expander("AUC table", expanded=False):
+                st.dataframe(auc_df, use_container_width=True)
+
+            st.markdown("### 4. Metadata integration")
+
+            metadata_editor_df = metadata_df.copy()
+            metadata_editor_df["HPLC_filename"] = metadata_editor_df["HPLC_filename"].fillna("")
+
+            edited_meta = st.data_editor(
+                metadata_editor_df,
+                use_container_width=True,
+                num_rows="fixed",
+                key="metadata_editor_tab7",
+            )
+
+            if st.button("Merge AUC with metadata", key="merge_auc_metadata_tab7"):
+                merged_auc_df = merge_auc_with_metadata(auc_df, edited_meta)
+                st.session_state["merged_auc_tab7"] = merged_auc_df
+
+            merged_auc_df = st.session_state.get("merged_auc_tab7", None)
+
+            if merged_auc_df is not None and not merged_auc_df.empty:
+                with st.expander("Merged metadata + AUC", expanded=False):
+                    st.dataframe(merged_auc_df, use_container_width=True)
+
+                st.markdown("### 5. Keq calculation")
+
+                if st.button("Calculate Keq (FS/FI and FI/FS)", key="calc_keq_tab7"):
+                    keq_df = calculate_keq_from_metadata(merged_auc_df)
+                    st.session_state["keq_tab7"] = keq_df
+
+                keq_df = st.session_state.get("keq_tab7", None)
+
+                if keq_df is not None and not keq_df.empty:
+                    with st.expander("Keq table", expanded=True):
+                        st.dataframe(keq_df, use_container_width=True)
+
+                    keq_plot_candidates = [c for c in keq_df.columns if c.endswith("_FS_over_FI")]
+                    if keq_plot_candidates:
+                        selected_keq_col = st.selectbox(
+                            "Keq column to visualize",
+                            options=keq_plot_candidates,
+                            key="selected_keq_plot_col_tab7",
+                        )
+
+                        fig_keq = px.bar(
+                            keq_df,
+                            x="pair_id",
+                            y=selected_keq_col,
+                            color="sample_id",
+                            title=f"Keq plot: {selected_keq_col}",
+                            barmode="group",
+                        )
+                        fig_keq.update_layout(
+                            xaxis_title="Pair ID",
+                            yaxis_title="Keq"
+                        )
+                        st.plotly_chart(fig_keq, use_container_width=True)
+
+                    st.markdown("### 6. Downloads")
+                    st.download_button(
+                        "Download regions table (CSV)",
+                        data=convert_df_to_csv(regions_df),
+                        file_name="integration_regions.csv",
+                        mime="text/csv",
+                    )
+
+                    st.download_button(
+                        "Download AUC table (CSV)",
+                        data=convert_df_to_csv(auc_df),
+                        file_name="auc_table.csv",
+                        mime="text/csv",
+                    )
+
+                    st.download_button(
+                        "Download merged metadata + AUC (CSV)",
+                        data=convert_df_to_csv(merged_auc_df),
+                        file_name="metadata_auc_merged.csv",
+                        mime="text/csv",
+                    )
+
+                    st.download_button(
+                        "Download Keq table (CSV)",
+                        data=convert_df_to_csv(keq_df),
+                        file_name="keq_table.csv",
+                        mime="text/csv",
+                    )
 
 # =========================================================
 # FOOTER
