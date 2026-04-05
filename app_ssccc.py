@@ -6,6 +6,7 @@ import re
 import zipfile
 import math
 from pathlib import Path
+from PIL import Image
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -27,14 +28,14 @@ st.set_page_config(
 # =========================================================
 # OPTIONAL LOGOS
 # =========================================================
-def load_logo(path_str: str):
-    path = Path(path_str)
-    if path.exists():
-        return str(path)
-    return None
 
-LOGO_MAIN = load_logo("static/LAABio.png")
-LOGO_SECONDARY = load_logo("static/IPPN.png")
+LOGO_PATH = STATIC_DIR / "LAABio.png"
+
+try:
+    logo = Image.open(LOGO_PATH)  # raises if missing
+    st.sidebar.image(logo, use_container_width=True)
+except FileNotFoundError:
+    st.sidebar.warning("Logo not found at static/LAABio.png")
 
 # =========================================================
 # HELPERS
