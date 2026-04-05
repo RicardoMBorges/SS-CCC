@@ -624,8 +624,9 @@ st.markdown("---")
 # =========================================================
 # TABS
 # =========================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
+        "PROPOSED PIPELINE",
         "1. Sample Upload",
         "2. Solvent Systems",
         "3. Sample Preparation",
@@ -635,6 +636,19 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         "7. Data Integration / Keq",
     ]
 )
+
+# =========================================================
+# TAB 0 - PROPOSED PIPELINE
+# =========================================================
+with tab1:
+    st.subheader("PROPOSED PIPELINE")
+    pipeline_PATH = STATIC_DIR / "pipeline.png"
+    try:
+        pipeline = Image.open(pipeline_PATH)  # raises if missing
+        st.image(pipeline, use_container_width=True)
+    except FileNotFoundError:
+        st.warning("Pipeline not found at static/pipeline.png")
+
 
 # =========================================================
 # TAB 1 - SAMPLE UPLOAD
