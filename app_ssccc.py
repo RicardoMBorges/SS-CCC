@@ -574,11 +574,6 @@ with st.sidebar:
     st.markdown("## CCC Planner")
     st.caption("Experimental planning for solvent-system studies and future OT-2 export.")
 
-    if LOGO_MAIN:
-        st.image(LOGO_MAIN, use_container_width=True)
-    if LOGO_SECONDARY:
-        st.image(LOGO_SECONDARY, use_container_width=True)
-
     st.markdown("---")
     st.markdown("### Study setup")
     batch_size = st.number_input(
