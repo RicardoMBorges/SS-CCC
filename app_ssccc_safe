@@ -6,6 +6,7 @@ import re
 import zipfile
 import math
 from pathlib import Path
+from PIL import Image
 from typing import Dict, List, Tuple
 
 import numpy as np
@@ -27,14 +28,23 @@ st.set_page_config(
 # =========================================================
 # OPTIONAL LOGOS
 # =========================================================
-def load_logo(path_str: str):
-    path = Path(path_str)
-    if path.exists():
-        return str(path)
-    return None
+STATIC_DIR = Path(__file__).parent / "static"
+LOGO_pyMETAflow_HPLC_PATH = STATIC_DIR / "PBGdiscovery_transp.png"
+try:
+    logo = Image.open(LOGO_pyMETAflow_HPLC_PATH)  # raises if missing
+    st.sidebar.image(logo, use_container_width=True)
+except FileNotFoundError:
+    st.sidebar.warning("Logo not found at static/pyMETAflow_HPLC.png")
 
-LOGO_MAIN = load_logo("static/LAABio.png")
-LOGO_SECONDARY = load_logo("static/IPPN.png")
+# ------------------ Sidebar: Uploads & Preferences ------------------
+LOGO_PATH = STATIC_DIR / "LAABio.png"
+
+try:
+    logo = Image.open(LOGO_PATH)  # raises if missing
+    st.sidebar.image(logo, use_container_width=True)
+except FileNotFoundError:
+    st.sidebar.warning("Logo not found at static/LAABio.png")
+
 
 # =========================================================
 # HELPERS
@@ -564,11 +574,6 @@ with st.sidebar:
     st.markdown("## CCC Planner")
     st.caption("Experimental planning for solvent-system studies and future OT-2 export.")
 
-    if LOGO_MAIN:
-        st.image(LOGO_MAIN, use_container_width=True)
-    if LOGO_SECONDARY:
-        st.image(LOGO_SECONDARY, use_container_width=True)
-
     st.markdown("---")
     st.markdown("### Study setup")
     batch_size = st.number_input(
@@ -608,24 +613,20 @@ with st.sidebar:
 # =========================================================
 # MAIN HEADER
 # =========================================================
-col_logo, col_title = st.columns([1, 5])
-with col_logo:
-    if LOGO_MAIN:
-        st.image(LOGO_MAIN, use_container_width=True)
-with col_title:
-    st.title("CCC Solvent System Planner")
-    st.markdown(
-        "Design, document, and organize solvent-system studies for countercurrent chromatography "
-        "with a future-ready structure for OT-2 automation."
-    )
+st.title("CCC Solvent System Planner")
+st.markdown(
+    "Design, document, and organize solvent-system studies for countercurrent chromatography "
+    "with a future-ready structure for OT-2 automation."
+)
 
 st.markdown("---")
 
 # =========================================================
 # TABS
 # =========================================================
-tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
+tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
     [
+        "PROPOSED PIPELINE",
         "1. Sample Upload",
         "2. Solvent Systems",
         "3. Sample Preparation",
@@ -635,6 +636,19 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         "7. Data Integration / Keq",
     ]
 )
+
+# =========================================================
+# TAB 0 - PROPOSED PIPELINE
+# =========================================================
+with tab0:
+    st.subheader("PROPOSED PIPELINE")
+    pipeline_PATH = STATIC_DIR / "pipeline.png"
+    try:
+        pipeline = Image.open(pipeline_PATH)  # raises if missing
+        st.image(pipeline, use_container_width=True)
+    except FileNotFoundError:
+        st.warning("Pipeline not found at static/pipeline.png")
+
 
 # =========================================================
 # TAB 1 - SAMPLE UPLOAD
