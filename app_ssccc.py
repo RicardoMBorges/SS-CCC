@@ -820,7 +820,7 @@ This imported HPLC layer will later be connected to:
             st.session_state["combined_hplc_tab6"] = combined_hplc
 
             st.markdown("### 4. Combined raw matrix")
-            st.dataframe(combined_hplc, use_container_width=True)
+            st.expander.dataframe(combined_hplc, use_container_width=True)
 
             hplc_grid_df, _ = resample_to_grid(
                 combined_hplc,
