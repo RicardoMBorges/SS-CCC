@@ -132,6 +132,27 @@ def rename_solvent_columns(df: pd.DataFrame, solvent_names: List[str]) -> pd.Dat
         rename_map[f"Solvent_{i}_uL"] = f"{solvent}_uL"
     return df.rename(columns=rename_map)
 
+def expand_systems_to_phases(systems_df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Expand each solvent system (S1...S5) into two phases:
+    superior (sup) and inferior (inf).
+
+    Example:
+        S1 -> S1_sup, S1_inf
+    """
+    records = []
+    for _, row in systems_df.iterrows():
+        base = row.to_dict()
+        system_name = str(base["System"])
+
+        for phase in ["sup", "inf"]:
+            new_row = base.copy()
+            new_row["base_system"] = system_name
+            new_row["phase"] = phase
+            new_row["System"] = f"{system_name}_{phase}"
+            records.append(new_row)
+
+    return pd.DataFrame(records)
 
 def make_system_plot(df_systems: pd.DataFrame, solvent_names: List[str]) -> go.Figure:
     frac_cols = [f"{s}_frac" for s in solvent_names]
@@ -164,14 +185,22 @@ def build_preparation_table(samples_df: pd.DataFrame, systems_df: pd.DataFrame) 
         sample_id = row["sample_id"]
         sample_index = int(row["sample_index"])
         batch_label = row.get("batch_label", "B01")
-        for system in systems_df["System"]:
+
+        for _, sysrow in systems_df.iterrows():
+            system = sysrow["System"]           # e.g. S1_sup
+            base_system = sysrow["base_system"] # e.g. S1
+            phase = sysrow["phase"]             # sup / inf
+
             tube_code = f"{batch_label}_SM{sample_index:03d}_{system}"
             vial_label = f"{sample_id}_{system}"
+
             records.append(
                 {
                     "batch_label": batch_label,
                     "sample_id": sample_id,
                     "sample_index": sample_index,
+                    "base_system": base_system,
+                    "phase": phase,
                     "system": system,
                     "tube_code": tube_code,
                     "label_text": vial_label,
@@ -197,30 +226,45 @@ def build_metadata_table(
         sample_index = int(srow["sample_index"])
 
         for _, sysrow in systems_df.iterrows():
-            system = sysrow["System"]
+            system = sysrow["System"]            # S1_sup / S1_inf
+            base_system = sysrow["base_system"]  # S1
+            phase = sysrow["phase"]              # sup / inf
+
             tube_code = f"{batch_label}_SM{sample_index:03d}_{system}"
+
             entry = {
                 "batch_label": batch_label,
                 "sample_id": sample_id,
                 "sample_index": sample_index,
+                "base_system": base_system,
+                "phase": phase,
                 "system": system,
                 "tube_code": tube_code,
                 "label_text": f"{sample_id}_{system}",
                 "sample_mass_equivalent_mg": 50,
                 "aliquot_volume_mL": 1.0,
+                "ATTRIBUTE_CCC": f"{base_system}_{'FS' if phase == 'sup' else 'FI'}",
+                "HPLC_filename": "",
             }
+
             for solvent in solvent_names:
                 entry[f"{solvent}_mL"] = sysrow[f"{solvent}_mL"]
                 entry[f"{solvent}_uL"] = sysrow[f"{solvent}_uL"]
+
             entry["total_solvent_volume_mL"] = sysrow["Total_mL"]
             records.append(entry)
+
     return pd.DataFrame(records)
 
 
 def build_future_ot2_table(metadata_df: pd.DataFrame, solvent_names: List[str]) -> pd.DataFrame:
-    out = metadata_df[["tube_code", "sample_id", "system", "label_text"]].copy()
+    out = metadata_df[
+        ["tube_code", "sample_id", "base_system", "phase", "system", "label_text", "ATTRIBUTE_CCC"]
+    ].copy()
+
     for solvent in solvent_names:
         out[f"{solvent}_uL"] = metadata_df[f"{solvent}_uL"]
+
     out["mix_after_addition"] = "TO_DEFINE"
     out["aspirate_height_strategy"] = "TO_DEFINE"
     out["dispense_height_strategy"] = "TO_DEFINE"
@@ -361,8 +405,12 @@ future_ot2_df = pd.DataFrame()
 if can_build:
     systems_df = generate_five_systems(total_volume_ml=total_volume_ml)
     renamed_systems_df = rename_solvent_columns(systems_df, solvent_names)
-    prep_df = build_preparation_table(samples_df, renamed_systems_df)
-    metadata_df = build_metadata_table(samples_df, renamed_systems_df, solvent_names)
+
+    # Expanded table for actual produced tubes: S1_sup, S1_inf ... S5_sup, S5_inf
+    phased_systems_df = expand_systems_to_phases(renamed_systems_df)
+
+    prep_df = build_preparation_table(samples_df, phased_systems_df)
+    metadata_df = build_metadata_table(samples_df, phased_systems_df, solvent_names)
     future_ot2_df = build_future_ot2_table(metadata_df, solvent_names)
 
 # =========================================================
@@ -398,9 +446,10 @@ with tab3:
     st.subheader("Sample preparation instructions")
     with st.expander("Preparation logic", expanded=True):
         st.markdown(
-            "The current workflow assumes: **300 mg** initial sample mass, preparation of a **50 mg/mL** stock solution, "
-            "and transfer of **1.0 mL aliquots** to create five tubes, each containing **50 mg equivalent** of sample. "
-            "These tubes are then intended for solvent addition and future OT-2 handling."
+"The current workflow assumes: **300 mg** initial sample mass, preparation of a **50 mg/mL** stock solution, "
+"and transfer of **1.0 mL aliquots** to create **five initial system tubes (S1-S5)**, each containing "
+"**50 mg equivalent** of sample. After solvent addition and phase separation, each system generates "
+"**two phases**, resulting in **ten final analytical tubes per sample**: S1_inf, S1_sup, ..., S5_inf, S5_sup."
         )
 
     if not can_build:
@@ -413,10 +462,14 @@ For each sample in batch **{batch_label}**:
 
 1. Weigh **300 mg** of sample.
 2. Dissolve to a final volume of **6.0 mL** to obtain **50 mg/mL**.
-3. Prepare **five tubes** corresponding to systems **S1–S5**.
-4. Transfer **1.0 mL** to each tube.
-5. Each tube will contain **50 mg equivalent** of sample.
-6. After this step, each tube should receive the solvent system defined in the solvent-systems tab.
+3. Prepare **five initial tubes** corresponding to systems **S1–S5**.
+4. Transfer **1.0 mL** to each initial system tube.
+5. Each initial tube will contain **50 mg equivalent** of sample.
+6. After solvent addition and phase separation, each system will produce:
+   - **one superior phase tube**
+   - **one inferior phase tube**
+7. Therefore, each sample will generate **10 final labeled phase tubes**:
+   **S1_inf, S1_sup, S2_inf, S2_sup, ..., S5_inf, S5_sup**.
 """
         )
 
