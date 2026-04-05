@@ -28,7 +28,15 @@ st.set_page_config(
 # =========================================================
 # OPTIONAL LOGOS
 # =========================================================
+STATIC_DIR = Path(__file__).parent / "static"
+LOGO_pyMETAflow_HPLC_PATH = STATIC_DIR / "PBGdiscovery_transp.png"
+try:
+    logo = Image.open(LOGO_pyMETAflow_HPLC_PATH)  # raises if missing
+    st.sidebar.image(logo, use_container_width=True)
+except FileNotFoundError:
+    st.sidebar.warning("Logo not found at static/pyMETAflow_HPLC.png")
 
+# ------------------ Sidebar: Uploads & Preferences ------------------
 LOGO_PATH = STATIC_DIR / "LAABio.png"
 
 try:
@@ -36,6 +44,7 @@ try:
     st.sidebar.image(logo, use_container_width=True)
 except FileNotFoundError:
     st.sidebar.warning("Logo not found at static/LAABio.png")
+
 
 # =========================================================
 # HELPERS
