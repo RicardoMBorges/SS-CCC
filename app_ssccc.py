@@ -640,7 +640,7 @@ tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
 # =========================================================
 # TAB 0 - PROPOSED PIPELINE
 # =========================================================
-with tab1:
+with tab0:
     st.subheader("PROPOSED PIPELINE")
     pipeline_PATH = STATIC_DIR / "pipeline.png"
     try:
