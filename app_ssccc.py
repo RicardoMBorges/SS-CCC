@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import io
+import os
+import re
+import zipfile
 import math
 from pathlib import Path
 from typing import Dict, List, Tuple
@@ -270,6 +273,183 @@ def build_future_ot2_table(metadata_df: pd.DataFrame, solvent_names: List[str]) 
     out["dispense_height_strategy"] = "TO_DEFINE"
     return out
 
+# HPLC Import Helper
+def parse_labsolutions_ascii(file_name: str, raw_bytes: bytes) -> pd.DataFrame:
+    """
+    Return DF with columns ['RT(min)', <sample_name>] from LabSolutions ASCII.
+    Supports:
+      - 2D ASCII: header 'R.Time (min)    Intensity'
+      - PDA 3D ASCII: section [PDA 3D] with wavelength columns
+    For 3D, this function extracts one wavelength trace automatically
+    (default: nearest to 254 nm).
+    """
+    try:
+        text = raw_bytes.decode("latin1", errors="ignore")
+    except Exception:
+        text = raw_bytes.decode("utf-8", errors="ignore")
+
+    base = os.path.splitext(os.path.basename(file_name))[0]
+
+    header_2d_re = re.compile(r"^R\.Time \(min\)\s+Intensity\s*$", flags=re.MULTILINE)
+    header_3d_re = re.compile(r"^\[PDA 3D\]\s*$", flags=re.MULTILINE)
+
+    m2d = header_2d_re.search(text)
+    if m2d:
+        table = text[m2d.start():]
+        df = pd.read_csv(io.StringIO(table), sep=r"\s+", engine="python")
+        df = df.iloc[:, :2].copy()
+        df.columns = ["RT(min)", base]
+
+        df["RT(min)"] = pd.to_numeric(
+            df["RT(min)"].astype(str).str.replace(",", ".", regex=False),
+            errors="coerce"
+        )
+        df[base] = pd.to_numeric(
+            df[base].astype(str).str.replace(",", ".", regex=False),
+            errors="coerce"
+        )
+
+        df = df[df["RT(min)"].notna()].reset_index(drop=True)
+        return df
+
+    if header_3d_re.search(text):
+        lines = text.splitlines()
+
+        rt_header_idx = None
+        for i, line in enumerate(lines):
+            if line.strip() == "R.Time (min)":
+                rt_header_idx = i
+                break
+
+        if rt_header_idx is None:
+            raise ValueError("Found PDA 3D block, but could not find 'R.Time (min)' header.")
+
+        wl_line = lines[rt_header_idx + 1].strip()
+        wl_tokens = re.split(r"\s+", wl_line)
+        wl_tokens = [w for w in wl_tokens if w != ""]
+
+        wavelengths = pd.to_numeric(pd.Series(wl_tokens), errors="coerce").dropna().tolist()
+        if len(wavelengths) == 0:
+            raise ValueError("Could not parse wavelength axis from PDA 3D file.")
+
+        target_wl = 254
+        wl_idx = int(np.argmin(np.abs(np.array(wavelengths) - target_wl)))
+
+        data_rows = []
+        for line in lines[rt_header_idx + 2:]:
+            toks = re.split(r"\s+", line.strip())
+            if len(toks) < 2:
+                continue
+
+            rt_val = pd.to_numeric(str(toks[0]).replace(",", "."), errors="coerce")
+            if pd.isna(rt_val):
+                continue
+
+            numeric_vals = pd.to_numeric(
+                pd.Series([str(x).replace(",", ".") for x in toks[1:]]),
+                errors="coerce"
+            ).tolist()
+
+            if wl_idx < len(numeric_vals):
+                inten = numeric_vals[wl_idx]
+                data_rows.append([rt_val, inten])
+
+        if not data_rows:
+            raise ValueError("No valid RT/intensity pairs parsed from PDA 3D file.")
+
+        df = pd.DataFrame(data_rows, columns=["RT(min)", base])
+        df = df[df["RT(min)"].notna()].reset_index(drop=True)
+        return df
+
+    raise ValueError(
+        "Unrecognized LabSolutions ASCII format. Expected either 2D or PDA 3D."
+    )
+
+def outer_join_rt(dfs: dict) -> pd.DataFrame:
+    combined = None
+    for _, df in dfs.items():
+        combined = df if combined is None else combined.merge(df, on="RT(min)", how="outer")
+    if combined is not None:
+        combined = combined.sort_values("RT(min)").reset_index(drop=True)
+    return combined
+
+def resample_to_grid(df: pd.DataFrame, step: float, rt_min=None, rt_max=None):
+    if df is None or df.empty or "RT(min)" not in df.columns:
+        return None, None
+
+    x = pd.to_numeric(df["RT(min)"], errors="coerce").values
+    if x.size == 0 or np.all(np.isnan(x)):
+        return None, None
+
+    step = float(step) if step and float(step) > 0 else 0.02
+    grid_min = float(rt_min) if rt_min is not None else float(np.nanmin(x))
+    grid_max = float(rt_max) if rt_max is not None else float(np.nanmax(x))
+
+    if grid_max <= grid_min:
+        grid_max = grid_min + 0.01
+
+    grid = np.arange(grid_min, grid_max + step / 2, step, dtype=float)
+    out = {"RT(min)": grid}
+
+    for c in df.columns:
+        if c == "RT(min)":
+            continue
+        y = pd.to_numeric(df[c], errors="coerce").values
+        y = pd.Series(y).interpolate(limit_direction="both").values
+        out[c] = np.interp(grid, x, y, left=np.nan, right=np.nan)
+
+    return pd.DataFrame(out), grid
+
+def moving_average(arr: np.ndarray, win: int) -> np.ndarray:
+    if win is None or win <= 1:
+        return arr
+    return pd.Series(arr).rolling(window=win, min_periods=1, center=True).mean().values
+
+
+def baseline_subtract(arr: np.ndarray, method: str, param: float) -> np.ndarray:
+    if method == "none":
+        return arr
+    if method == "median":
+        return arr - np.nanmedian(arr)
+    if method == "rolling_min":
+        w = max(3, int(param))
+        s = pd.Series(arr).rolling(window=w, min_periods=1, center=True).min().values
+        return arr - s
+    return arr
+
+
+def normalize_trace(arr: np.ndarray, mode: str) -> np.ndarray:
+    if mode == "none":
+        return arr
+    a = arr.copy()
+    if mode == "max=1":
+        m = np.nanmax(np.abs(a))
+        return a / m if m else a
+    if mode == "area=1":
+        s = np.nansum(np.abs(a))
+        return a / s if s else a
+    if mode == "zscore":
+        mu = np.nanmean(a)
+        sd = np.nanstd(a)
+        return (a - mu) / sd if sd else a
+    return a
+
+
+def preprocess_matrix(df: pd.DataFrame, smooth_win: int, baseline_method: str, baseline_param: float, norm_mode: str) -> pd.DataFrame:
+    if df is None:
+        return None
+    out = df.copy()
+    for c in out.columns:
+        if c == "RT(min)":
+            continue
+        y = pd.to_numeric(out[c], errors="coerce").values
+        y = moving_average(y, smooth_win)
+        y = baseline_subtract(y, baseline_method, baseline_param)
+        y = normalize_trace(y, norm_mode)
+        out[c] = y
+    return out
+
+
 
 # =========================================================
 # SIDEBAR
@@ -338,13 +518,14 @@ st.markdown("---")
 # =========================================================
 # TABS
 # =========================================================
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
         "1. Sample Upload",
         "2. Solvent Systems",
         "3. Sample Preparation",
         "4. Labels & Metadata",
         "5. Future OT-2 Export",
+        "6. HPLC Import",
     ]
 )
 
@@ -528,6 +709,221 @@ with tab5:
             file_name="ccc_future_ot2_import_table.csv",
             mime="text/csv",
         )
+
+with tab6:
+    st.subheader("HPLC Data Import")
+    with st.expander("What this tab does", expanded=True):
+        st.markdown(
+            """
+This tab imports LabSolutions ASCII HPLC files, builds a combined chromatogram matrix,
+resamples chromatograms on a common RT grid, applies optional preprocessing, and displays
+overlay, stacked, and heatmap visualizations.
+
+This imported HPLC layer will later be connected to:
+- **Keq calculations**
+- **phase metadata (FI / FS)**
+- **bioactivity correlation**
+"""
+        )
+
+    st.markdown("### 1. Upload chromatograms (.txt)")
+    hplc_uploads = st.file_uploader(
+        "Upload LabSolutions ASCII chromatograms",
+        type=["txt"],
+        accept_multiple_files=True,
+        key="hplc_uploads_tab6",
+    )
+
+    st.markdown("### 2. Processing options")
+    c1, c2, c3, c4 = st.columns(4)
+    with c1:
+        grid_step_tab6 = st.number_input(
+            "Uniform grid step (min)",
+            value=0.02,
+            min_value=0.001,
+            step=0.001,
+            format="%.3f",
+            key="grid_step_tab6",
+        )
+    with c2:
+        smooth_win_tab6 = st.number_input(
+            "Smoothing window (pts)",
+            value=1,
+            min_value=1,
+            step=1,
+            key="smooth_win_tab6",
+        )
+    with c3:
+        baseline_method_tab6 = st.selectbox(
+            "Baseline",
+            options=["none", "median", "rolling_min"],
+            index=1,
+            key="baseline_method_tab6",
+        )
+    with c4:
+        baseline_param_tab6 = st.number_input(
+            "Baseline param",
+            value=101,
+            min_value=3,
+            step=2,
+            key="baseline_param_tab6",
+        )
+
+    c5, c6 = st.columns(2)
+    with c5:
+        norm_mode_tab6 = st.selectbox(
+            "Normalization",
+            options=["none", "max=1", "area=1", "zscore"],
+            index=2,
+            key="norm_mode_tab6",
+        )
+    with c6:
+        rt_range_tab6 = st.text_input(
+            "RT range (min,max) or blank",
+            value="",
+            key="rt_range_tab6",
+        )
+
+    rt_min_tab6 = rt_max_tab6 = None
+    if rt_range_tab6.strip():
+        try:
+            parts = [float(x) for x in rt_range_tab6.split(",")]
+            if len(parts) == 2:
+                rt_min_tab6, rt_max_tab6 = parts
+        except Exception:
+            st.warning("RT range not parsed. Use format like: 0.5,45")
+
+    combined_hplc = None
+    hplc_grid_df = None
+
+    if hplc_uploads:
+        parsed = {}
+        report_rows = []
+
+        for f in hplc_uploads:
+            try:
+                raw = f.getvalue()
+                df = parse_labsolutions_ascii(f.name, raw)
+                parsed[f.name] = df
+                report_rows.append({"file": f.name, "status": "parsed", "rows": len(df)})
+            except Exception as e:
+                report_rows.append({"file": f.name, "status": f"error: {e}", "rows": 0})
+
+        report_df = pd.DataFrame(report_rows)
+
+        st.markdown("### 3. Parsing report")
+        st.dataframe(report_df, use_container_width=True)
+
+        combined_hplc = outer_join_rt(parsed) if parsed else None
+
+        if combined_hplc is not None and not combined_hplc.empty:
+            st.session_state["combined_hplc_tab6"] = combined_hplc
+
+            st.markdown("### 4. Combined raw matrix")
+            st.dataframe(combined_hplc, use_container_width=True)
+
+            hplc_grid_df, _ = resample_to_grid(
+                combined_hplc,
+                step=float(grid_step_tab6),
+                rt_min=rt_min_tab6,
+                rt_max=rt_max_tab6,
+            )
+
+            if hplc_grid_df is not None and not hplc_grid_df.empty:
+                hplc_grid_df = preprocess_matrix(
+                    hplc_grid_df,
+                    int(smooth_win_tab6),
+                    baseline_method_tab6,
+                    float(baseline_param_tab6),
+                    norm_mode_tab6,
+                )
+                st.session_state["processed_hplc_tab6"] = hplc_grid_df
+
+                st.markdown("### 5. Processed HPLC matrix")
+                st.dataframe(hplc_grid_df, use_container_width=True)
+
+                st.markdown("### 6. Visualizations")
+                plot_df = hplc_grid_df.melt(
+                    id_vars="RT(min)",
+                    var_name="Sample",
+                    value_name="Intensity"
+                ).dropna(subset=["Intensity"])
+
+                t61, t62, t63 = st.tabs(["Overlay", "Stacked", "Heatmap"])
+
+                with t61:
+                    fig1 = px.line(
+                        plot_df,
+                        x="RT(min)",
+                        y="Intensity",
+                        color="Sample",
+                        title="Overlay chromatograms"
+                    )
+                    fig1.update_layout(
+                        xaxis_title="RT (min)",
+                        yaxis_title="Intensity",
+                        legend_title="Sample"
+                    )
+                    st.plotly_chart(fig1, use_container_width=True)
+
+                with t62:
+                    samples_sorted = sorted([c for c in hplc_grid_df.columns if c != "RT(min)"])
+                    stack_step = st.number_input(
+                        "Stack offset",
+                        value=2.0,
+                        step=0.5,
+                        key="stack_step_tab6",
+                    )
+                    offset_map = {s: i * stack_step for i, s in enumerate(samples_sorted)}
+                    plot_df["Intensity_offset"] = plot_df.apply(
+                        lambda r: r["Intensity"] + offset_map[r["Sample"]],
+                        axis=1
+                    )
+
+                    fig2 = px.line(
+                        plot_df,
+                        x="RT(min)",
+                        y="Intensity_offset",
+                        color="Sample",
+                        title="Stacked chromatograms"
+                    )
+                    fig2.update_layout(
+                        xaxis_title="RT (min)",
+                        yaxis_title=f"Intensity + offset (step={stack_step})"
+                    )
+                    st.plotly_chart(fig2, use_container_width=True)
+
+                with t63:
+                    max_points = 5000
+                    sub = hplc_grid_df
+                    if len(hplc_grid_df) > max_points:
+                        sub = hplc_grid_df.iloc[:: int(np.ceil(len(hplc_grid_df) / max_points)), :]
+
+                    mat = sub[[c for c in sub.columns if c != "RT(min)"]].T.values
+
+                    fig3 = go.Figure(
+                        data=go.Heatmap(
+                            z=mat,
+                            x=sub["RT(min)"].values,
+                            y=[c for c in sub.columns if c != "RT(min)"],
+                            coloraxis="coloraxis"
+                        )
+                    )
+                    fig3.update_layout(
+                        title="Intensity heatmap",
+                        xaxis_title="RT (min)",
+                        yaxis_title="Sample",
+                        coloraxis_colorscale="Viridis"
+                    )
+                    st.plotly_chart(fig3, use_container_width=True)
+
+                st.markdown("### 7. Downloads")
+                st.download_button(
+                    "Download processed HPLC matrix (CSV)",
+                    data=convert_df_to_csv(hplc_grid_df),
+                    file_name="hplc_processed_matrix.csv",
+                    mime="text/csv",
+                )
 
 # =========================================================
 # FOOTER
