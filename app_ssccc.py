@@ -812,7 +812,8 @@ This imported HPLC layer will later be connected to:
         report_df = pd.DataFrame(report_rows)
 
         st.markdown("### 3. Parsing report")
-        st.dataframe(report_df, use_container_width=True)
+        with st.expander("Parsing report", expanded=False):
+            st.dataframe(report_df, use_container_width=True)
 
         combined_hplc = outer_join_rt(parsed) if parsed else None
 
@@ -841,7 +842,8 @@ This imported HPLC layer will later be connected to:
                 st.session_state["processed_hplc_tab6"] = hplc_grid_df
 
                 st.markdown("### 5. Processed HPLC matrix")
-                st.dataframe(hplc_grid_df, use_container_width=True)
+                with st.expander("Processed HPLC matrix", expanded=False):
+                    st.dataframe(hplc_grid_df, use_container_width=True)
 
                 st.markdown("### 6. Visualizations")
                 plot_df = hplc_grid_df.melt(
