@@ -613,10 +613,7 @@ with st.sidebar:
 # =========================================================
 # MAIN HEADER
 # =========================================================
-col_logo, col_title = st.columns([1, 5])
-with col_logo:
-    if LOGO_MAIN:
-        st.image(LOGO_MAIN, use_container_width=True)
+col_title = st.columns([1, 5])
 with col_title:
     st.title("CCC Solvent System Planner")
     st.markdown(
