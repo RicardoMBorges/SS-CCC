@@ -613,13 +613,11 @@ with st.sidebar:
 # =========================================================
 # MAIN HEADER
 # =========================================================
-col_title = st.columns([1, 5])
-with col_title:
-    st.title("CCC Solvent System Planner")
-    st.markdown(
-        "Design, document, and organize solvent-system studies for countercurrent chromatography "
-        "with a future-ready structure for OT-2 automation."
-    )
+st.title("CCC Solvent System Planner")
+st.markdown(
+    "Design, document, and organize solvent-system studies for countercurrent chromatography "
+    "with a future-ready structure for OT-2 automation."
+)
 
 st.markdown("---")
 
