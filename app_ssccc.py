@@ -9,8 +9,19 @@ from pathlib import Path
 from PIL import Image
 from typing import Dict, List, Tuple
 
-import data_processing_HPLC as dp
-from alignment_utils import alignment_controls, align_df
+DP_AVAILABLE = True
+try:
+    import data_processing_HPLC as dp
+except Exception as e:
+    DP_AVAILABLE = False
+    DP_IMPORT_ERROR = e
+
+ALIGN_AVAILABLE = True
+try:
+    from alignment_utils import alignment_controls, align_df
+except Exception as e:
+    ALIGN_AVAILABLE = False
+    ALIGN_IMPORT_ERROR = e
 
 try:
     from pyicoshift import icoshift  # noqa: F401
