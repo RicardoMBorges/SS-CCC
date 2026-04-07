@@ -277,6 +277,7 @@ def build_metadata_table(
                 "aliquot_volume_mL": 1.0,
                 "ATTRIBUTE_CCC": f"{base_system}_{'FS' if phase == 'sup' else 'FI'}",
                 "HPLC_filename": "",
+                "BioActivity_filename": "",
             }
 
             for solvent in solvent_names:
