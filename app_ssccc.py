@@ -1090,6 +1090,21 @@ Workflow:
             with st.expander("Processed HPLC matrix", expanded=False):
                 st.dataframe(df_grid_tab6, use_container_width=True)
 
+            plot_processed = df_grid_tab6.melt(
+                id_vars="RT(min)",
+                var_name="Sample",
+                value_name="Intensity"
+            ).dropna(subset=["Intensity"])
+
+            fig_processed = px.line(
+                plot_processed,
+                x="RT(min)",
+                y="Intensity",
+                color="Sample",
+                title="Processed chromatograms before alignment"
+            )
+            st.plotly_chart(fig_processed, use_container_width=True)
+
     # -------------------------------------------------
     # 6) Alignment
     # -------------------------------------------------
