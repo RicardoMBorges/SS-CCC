@@ -304,7 +304,7 @@ def build_future_ot2_table(metadata_df: pd.DataFrame, solvent_names: List[str]) 
     return out
 
 # HPLC Import Helper
-def parse_labsolutions_ascii(file_name: str, raw_bytes: bytes) -> pd.DataFrame:
+def parse_labsolutions_ascii(file_name: str, raw_bytes: bytes, target_wavelength: float = 254.0) -> pd.DataFrame:
     """
     Return DF with columns ['RT(min)', <sample_name>] from LabSolutions ASCII.
     Supports:
@@ -362,7 +362,7 @@ def parse_labsolutions_ascii(file_name: str, raw_bytes: bytes) -> pd.DataFrame:
         if len(wavelengths) == 0:
             raise ValueError("Could not parse wavelength axis from PDA 3D file.")
 
-        target_wl = 254
+        target_wl = float(target_wavelength)
         wl_idx = int(np.argmin(np.abs(np.array(wavelengths) - target_wl)))
 
         data_rows = []
@@ -853,6 +853,11 @@ with tab5:
 
 with tab6:
     st.subheader("HPLC / Metadata / BioActivity / STOCSY")
+    st.info(
+        "Upload here the UPDATED metadata file exported from tab 4 and edited by the user. "
+        "This file must contain at least the columns 'HPLC_filename' and, for STOCSY with bioactivity, "
+        "'BioActivity_filename'."
+    )
 
     with st.expander("What this tab does", expanded=True):
         st.markdown(
