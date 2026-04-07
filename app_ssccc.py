@@ -840,96 +840,127 @@ with tab5:
         )
 
 with tab6:
-    st.subheader("HPLC Data Import")
+    st.subheader("HPLC / Metadata / BioActivity / STOCSY")
+
     with st.expander("What this tab does", expanded=True):
         st.markdown(
             """
-This tab imports LabSolutions ASCII HPLC files, builds a combined chromatogram matrix,
-resamples chromatograms on a common RT grid, applies optional preprocessing, and displays
-overlay, stacked, and heatmap visualizations.
+This tab reproduces the pyMETAflow_HPLC workflow inside the SS-CCC app.
 
-This imported HPLC layer will later be connected to:
-- **Keq calculations**
-- **phase metadata (FI / FS)**
-- **bioactivity correlation**
+Workflow:
+1. Upload HPLC ASCII chromatograms
+2. Upload metadata containing HPLC_filename and BioActivity_filename
+3. Upload bioactivity table
+4. Map chromatograms through metadata
+5. Preprocess chromatograms
+6. Align chromatograms using PAFFT / RAFFT / Icoshift
+7. Run STOCSY using chromatographic data and bioactivity mapping
 """
         )
 
+    # -------------------------------------------------
+    # 1) Uploads
+    # -------------------------------------------------
     st.markdown("### 1. Upload chromatograms (.txt)")
-    hplc_uploads = st.file_uploader(
+    hplc_uploads_tab6 = st.file_uploader(
         "Upload LabSolutions ASCII chromatograms",
         type=["txt"],
         accept_multiple_files=True,
-        key="hplc_uploads_tab6",
+        key="hplc_uploads_tab6_main",
     )
 
-    st.markdown("### 2. Processing options")
-    c1, c2, c3, c4 = st.columns(4)
-    with c1:
-        grid_step_tab6 = st.number_input(
-            "Uniform grid step (min)",
-            value=0.02,
-            min_value=0.001,
-            step=0.001,
-            format="%.3f",
-            key="grid_step_tab6",
-        )
-    with c2:
-        smooth_win_tab6 = st.number_input(
-            "Smoothing window (pts)",
-            value=1,
-            min_value=1,
-            step=1,
-            key="smooth_win_tab6",
-        )
-    with c3:
-        baseline_method_tab6 = st.selectbox(
-            "Baseline",
-            options=["none", "median", "rolling_min"],
-            index=1,
-            key="baseline_method_tab6",
-        )
-    with c4:
-        baseline_param_tab6 = st.number_input(
-            "Baseline param",
-            value=101,
-            min_value=3,
-            step=2,
-            key="baseline_param_tab6",
-        )
+    st.markdown("### 2. Upload metadata")
+    meta_file_tab6 = st.file_uploader(
+        "Upload metadata file",
+        type=["csv", "txt", "tsv"],
+        key="meta_file_tab6",
+    )
 
-    c5, c6 = st.columns(2)
-    with c5:
-        norm_mode_tab6 = st.selectbox(
-            "Normalization",
-            options=["none", "max=1", "area=1", "zscore"],
-            index=2,
-            key="norm_mode_tab6",
-        )
-    with c6:
-        rt_range_tab6 = st.text_input(
-            "RT range (min,max) or blank",
-            value="",
-            key="rt_range_tab6",
-        )
+    st.markdown("### 3. Upload bioactivity")
+    bio_file_tab6 = st.file_uploader(
+        "Upload bioactivity file",
+        type=["csv", "txt", "tsv"],
+        key="bio_file_tab6",
+    )
 
-    rt_min_tab6 = rt_max_tab6 = None
-    if rt_range_tab6.strip():
+    # -------------------------------------------------
+    # 2) Read metadata / bioactivity
+    # -------------------------------------------------
+    meta_df_tab6 = None
+    if meta_file_tab6 is not None:
         try:
-            parts = [float(x) for x in rt_range_tab6.split(",")]
-            if len(parts) == 2:
-                rt_min_tab6, rt_max_tab6 = parts
+            meta_df_tab6 = pd.read_csv(meta_file_tab6, sep=";")
         except Exception:
-            st.warning("RT range not parsed. Use format like: 0.5,45")
+            try:
+                meta_df_tab6 = smart_read_table(meta_file_tab6)
+            except Exception as e:
+                st.error(f"Failed to read metadata: {e}")
 
-    combined_hplc = None
-    hplc_grid_df = None
+    if meta_df_tab6 is not None:
+        with st.expander("Metadata (head)", expanded=False):
+            st.dataframe(meta_df_tab6.head(10), use_container_width=True)
 
-    if hplc_uploads:
+    bio_df_tab6 = None
+    if bio_file_tab6 is not None:
+        try:
+            bio_df_tab6 = pd.read_csv(bio_file_tab6)
+        except Exception:
+            try:
+                bio_df_tab6 = smart_read_table(bio_file_tab6)
+            except Exception as e:
+                st.error(f"Failed to read bioactivity: {e}")
+
+    if bio_df_tab6 is not None:
+        with st.expander("Bioactivity (head)", expanded=False):
+            st.dataframe(bio_df_tab6.head(10), use_container_width=True)
+
+    # -------------------------------------------------
+    # 3) Metadata column mapping
+    # -------------------------------------------------
+    col_sample = col_hplc = col_bio = None
+
+    if meta_df_tab6 is not None:
+        cols = meta_df_tab6.columns.tolist()
+
+        col_sample = st.selectbox(
+            "Sample ID column (matches chromatogram columns after mapping)",
+            options=cols,
+            index=cols.index("Samples") if "Samples" in cols else 0,
+            key="col_sample_tab6",
+        )
+
+        default_hplc = "HPLC_filename" if "HPLC_filename" in cols else cols[0]
+        col_hplc = st.selectbox(
+            "Metadata column containing HPLC file stems",
+            options=cols,
+            index=cols.index(default_hplc),
+            key="col_hplc_tab6",
+        )
+
+        default_bio = "BioActivity_filename" if "BioActivity_filename" in cols else (
+            "BioAct_filename" if "BioAct_filename" in cols else None
+        )
+
+        if default_bio is not None:
+            col_bio = st.selectbox(
+                "Metadata column containing BioActivity file stems",
+                options=cols,
+                index=cols.index(default_bio),
+                key="col_bio_tab6",
+            )
+        else:
+            st.warning("Metadata should contain a BioActivity_filename column for STOCSY with bioactivity.")
+
+    # -------------------------------------------------
+    # 4) Parse HPLC uploads
+    # -------------------------------------------------
+    combined_tab6 = None
+
+    if hplc_uploads_tab6:
         parsed = {}
         report_rows = []
 
-        for f in hplc_uploads:
+        for f in hplc_uploads_tab6:
             try:
                 raw = f.getvalue()
                 df = parse_labsolutions_ascii(f.name, raw)
@@ -940,122 +971,333 @@ This imported HPLC layer will later be connected to:
 
         report_df = pd.DataFrame(report_rows)
 
-        st.markdown("### 3. Parsing report")
         with st.expander("Parsing report", expanded=False):
             st.dataframe(report_df, use_container_width=True)
 
-        combined_hplc = outer_join_rt(parsed) if parsed else None
+        combined_tab6 = outer_join_rt(parsed) if parsed else None
 
-        if combined_hplc is not None and not combined_hplc.empty:
-            st.session_state["combined_hplc_tab6"] = combined_hplc
+        if combined_tab6 is not None and meta_df_tab6 is not None and col_sample and col_hplc:
+            file_stems = [c for c in combined_tab6.columns if c != "RT(min)"]
+            name_map = {}
 
-            st.markdown("### 4. Combined raw matrix")
+            for _, row in meta_df_tab6.iterrows():
+                stem = str(row[col_hplc]).replace(".txt", "")
+                name_map[stem] = str(row[col_sample])
+
+            ren = {stem: name_map[stem] for stem in file_stems if stem in name_map}
+            if ren:
+                combined_tab6 = combined_tab6.rename(columns=ren)
+
+        if combined_tab6 is not None and not combined_tab6.empty:
             with st.expander("Combined raw matrix", expanded=False):
-                st.dataframe(combined_hplc, use_container_width=True)
+                st.dataframe(combined_tab6, use_container_width=True)
 
-            hplc_grid_df, _ = resample_to_grid(
-                combined_hplc,
-                step=float(grid_step_tab6),
-                rt_min=rt_min_tab6,
-                rt_max=rt_max_tab6,
+    # -------------------------------------------------
+    # 5) Preprocessing
+    # -------------------------------------------------
+    df_grid_tab6 = None
+
+    if combined_tab6 is not None and "RT(min)" in combined_tab6.columns:
+        st.markdown("### 4. Preprocessing")
+
+        c1, c2, c3, c4 = st.columns(4)
+        with c1:
+            grid_step_tab6 = st.number_input(
+                "Uniform grid step (min)",
+                value=0.02,
+                min_value=0.001,
+                step=0.001,
+                format="%.3f",
+                key="grid_step_tab6_main",
+            )
+        with c2:
+            smooth_win_tab6 = st.number_input(
+                "Smoothing window (pts)",
+                value=1,
+                min_value=1,
+                step=1,
+                key="smooth_win_tab6_main",
+            )
+        with c3:
+            baseline_method_tab6 = st.selectbox(
+                "Baseline",
+                ["none", "median", "rolling_min"],
+                index=1,
+                key="baseline_method_tab6_main",
+            )
+        with c4:
+            baseline_param_tab6 = st.number_input(
+                "Baseline param",
+                value=101,
+                min_value=3,
+                step=2,
+                key="baseline_param_tab6_main",
             )
 
-            if hplc_grid_df is not None and not hplc_grid_df.empty:
-                hplc_grid_df = preprocess_matrix(
-                    hplc_grid_df,
-                    int(smooth_win_tab6),
-                    baseline_method_tab6,
-                    float(baseline_param_tab6),
-                    norm_mode_tab6,
+        c5, c6 = st.columns(2)
+        with c5:
+            norm_mode_tab6 = st.selectbox(
+                "Normalization",
+                ["none", "max=1", "area=1", "zscore"],
+                index=2,
+                key="norm_mode_tab6_main",
+            )
+        with c6:
+            rt_range_tab6 = st.text_input(
+                "RT range (min,max) or blank",
+                value="",
+                key="rt_range_tab6_main",
+            )
+
+        rt_min = rt_max = None
+        if rt_range_tab6.strip():
+            try:
+                parts = [float(x) for x in rt_range_tab6.split(",")]
+                if len(parts) == 2:
+                    rt_min, rt_max = parts
+            except Exception:
+                st.warning("RT range not parsed. Use format like: 0.5,45")
+
+        df_grid_tab6, _ = resample_to_grid(
+            combined_tab6,
+            step=float(grid_step_tab6),
+            rt_min=rt_min,
+            rt_max=rt_max,
+        )
+
+        if df_grid_tab6 is not None and not df_grid_tab6.empty:
+            df_grid_tab6 = preprocess_matrix(
+                df_grid_tab6,
+                int(smooth_win_tab6),
+                baseline_method_tab6,
+                float(baseline_param_tab6),
+                norm_mode_tab6,
+            )
+
+            st.session_state["tab6_preprocessed_df"] = df_grid_tab6
+
+            with st.expander("Processed HPLC matrix", expanded=False):
+                st.dataframe(df_grid_tab6, use_container_width=True)
+
+    # -------------------------------------------------
+    # 6) Alignment
+    # -------------------------------------------------
+    df_aligned_tab6 = None
+    align_source_tab6 = st.session_state.get("tab6_preprocessed_df", None)
+
+    if align_source_tab6 is not None and not align_source_tab6.empty:
+        st.markdown("### 5. Alignment")
+
+        st.markdown("**Icoshift:** Interval correlation optimized shifting.")
+        st.markdown("**PAFFT / RAFFT:** FFT-based alignment methods for RT correction.")
+
+        sample_names = list(align_source_tab6.columns[0:])
+        method, params = alignment_controls(align_source_tab6, sample_names=sample_names)
+        df_aligned_tab6 = align_df(align_source_tab6, method, **params)
+
+        if df_aligned_tab6 is not None and not df_aligned_tab6.empty:
+            st.session_state["tab6_aligned_df"] = df_aligned_tab6
+
+            with st.expander("Aligned HPLC matrix", expanded=False):
+                st.dataframe(df_aligned_tab6, use_container_width=True)
+
+            plot_df = df_aligned_tab6.melt(
+                id_vars="RT(min)",
+                var_name="Sample",
+                value_name="Intensity"
+            ).dropna(subset=["Intensity"])
+
+            t61, t62, t63 = st.tabs(["Overlay", "Stacked", "Heatmap"])
+
+            with t61:
+                fig_overlay = px.line(
+                    plot_df,
+                    x="RT(min)",
+                    y="Intensity",
+                    color="Sample",
+                    title="Aligned chromatograms"
                 )
-                st.session_state["processed_hplc_tab6"] = hplc_grid_df
+                st.plotly_chart(fig_overlay, use_container_width=True)
 
-                st.markdown("### 5. Processed HPLC matrix")
-                with st.expander("Processed HPLC matrix", expanded=False):
-                    st.dataframe(hplc_grid_df, use_container_width=True)
+            with t62:
+                samples_sorted = sorted([c for c in df_aligned_tab6.columns if c != "RT(min)"])
+                stack_step = st.number_input(
+                    "Stack offset",
+                    value=2.0,
+                    step=0.5,
+                    key="stack_step_tab6_aligned",
+                )
+                offset_map = {s: i * stack_step for i, s in enumerate(samples_sorted)}
+                plot_df["Intensity_offset"] = plot_df.apply(
+                    lambda r: r["Intensity"] + offset_map[r["Sample"]],
+                    axis=1
+                )
 
-                st.markdown("### 6. Visualizations")
-                plot_df = hplc_grid_df.melt(
-                    id_vars="RT(min)",
-                    var_name="Sample",
-                    value_name="Intensity"
-                ).dropna(subset=["Intensity"])
+                fig_stack = px.line(
+                    plot_df,
+                    x="RT(min)",
+                    y="Intensity_offset",
+                    color="Sample",
+                    title="Stacked aligned chromatograms"
+                )
+                st.plotly_chart(fig_stack, use_container_width=True)
 
-                t61, t62, t63 = st.tabs(["Overlay", "Stacked", "Heatmap"])
+            with t63:
+                max_points = 5000
+                sub = df_aligned_tab6
+                if len(df_aligned_tab6) > max_points:
+                    sub = df_aligned_tab6.iloc[:: int(np.ceil(len(df_aligned_tab6) / max_points)), :]
 
-                with t61:
-                    fig1 = px.line(
-                        plot_df,
-                        x="RT(min)",
-                        y="Intensity",
-                        color="Sample",
-                        title="Overlay chromatograms"
+                mat = sub[[c for c in sub.columns if c != "RT(min)"]].T.values
+                fig_heat = go.Figure(
+                    data=go.Heatmap(
+                        z=mat,
+                        x=sub["RT(min)"].values,
+                        y=[c for c in sub.columns if c != "RT(min)"],
+                        coloraxis="coloraxis"
                     )
-                    fig1.update_layout(
-                        xaxis_title="RT (min)",
-                        yaxis_title="Intensity",
-                        legend_title="Sample"
-                    )
-                    st.plotly_chart(fig1, use_container_width=True)
+                )
+                fig_heat.update_layout(
+                    title="Aligned intensity heatmap",
+                    xaxis_title="RT (min)",
+                    yaxis_title="Sample",
+                    coloraxis_colorscale="Viridis"
+                )
+                st.plotly_chart(fig_heat, use_container_width=True)
 
-                with t62:
-                    samples_sorted = sorted([c for c in hplc_grid_df.columns if c != "RT(min)"])
-                    stack_step = st.number_input(
-                        "Stack offset",
-                        value=2.0,
-                        step=0.5,
-                        key="stack_step_tab6",
+    # -------------------------------------------------
+    # 7) STOCSY
+    # -------------------------------------------------
+    df_aligned_tab6 = st.session_state.get("tab6_aligned_df", None)
+
+    if df_aligned_tab6 is not None and meta_df_tab6 is not None and bio_df_tab6 is not None:
+        st.markdown("### 6. STOCSY")
+
+        use_bio_driver = st.checkbox(
+            "Use BioActivity fusion and drive STOCSY with BioAct",
+            value=True,
+            key="use_bio_driver_tab6",
+        )
+
+        if use_bio_driver and col_sample and col_hplc and col_bio:
+            try:
+                LC = df_aligned_tab6.drop(columns="RT(min)")
+                RT = df_aligned_tab6["RT(min)"]
+
+                ordered_samples = meta_df_tab6[col_sample].astype(str).tolist()
+                ordered_hplc = meta_df_tab6[col_hplc].astype(str).str.replace(".txt", "", regex=False).tolist()
+                ordered_bio = meta_df_tab6[col_bio].astype(str).str.replace(".txt", "", regex=False).tolist()
+
+                present_samples = [s for s in ordered_samples if s in LC.columns.astype(str).tolist()]
+
+                bio_df_tmp = bio_df_tab6.copy()
+                bio_cols = bio_df_tmp.columns.astype(str).str.replace(".txt", "", regex=False).tolist()
+
+                if not all(b in bio_cols for b in ordered_bio):
+                    if bio_df_tmp.shape[1] > 1:
+                        bio_df_tmp = bio_df_tmp.iloc[:, 1:]
+                        bio_cols = bio_df_tmp.columns.astype(str).str.replace(".txt", "", regex=False).tolist()
+
+                samples_ok = []
+                bio_cols_needed = []
+
+                for s, bb in zip(ordered_samples, ordered_bio):
+                    if s in present_samples and (bb in bio_cols):
+                        samples_ok.append(s)
+                        bio_cols_needed.append(bb)
+
+                if len(samples_ok) == 0:
+                    st.error("No overlapping samples between HPLC and BioActivity using the provided metadata.")
+                else:
+                    LC_ord = LC[samples_ok].copy()
+
+                    picked = None
+                    for r in range(bio_df_tmp.shape[0]):
+                        vals = pd.to_numeric(bio_df_tmp[bio_cols_needed].iloc[r], errors="coerce")
+                        if vals.notna().mean() > 0.8:
+                            picked = vals.values.astype(float)
+                            break
+                    if picked is None:
+                        picked = pd.to_numeric(
+                            bio_df_tmp[bio_cols_needed].iloc[0],
+                            errors="coerce"
+                        ).values.astype(float)
+
+                    BioActdata = pd.DataFrame([picked], columns=bio_cols_needed)
+                    BioActdata.rename(columns={i: j for i, j in zip(bio_cols_needed, samples_ok)}, inplace=True)
+                    BioActdata = BioActdata[samples_ok]
+
+                    MergeDF = pd.concat([LC_ord, BioActdata], ignore_index=True)
+
+                    gap = float(RT.values[-1] - RT.values[-2]) if len(RT) >= 2 else 0.01
+                    new_point = float(RT.values[-1]) + (gap if gap > 0 else 0.01)
+                    new_axis = pd.concat([RT, pd.Series([new_point])], ignore_index=True)
+
+                    st.success(f"Merged HPLC ({LC_ord.shape[0]}) + BioAct (1) for {len(samples_ok)} sample(s).")
+
+                    target_rt = st.number_input(
+                        "Target RT (min)",
+                        value=11.25,
+                        step=0.05,
+                        format="%.2f",
+                        key="target_rt_tab6",
                     )
-                    offset_map = {s: i * stack_step for i, s in enumerate(samples_sorted)}
-                    plot_df["Intensity_offset"] = plot_df.apply(
-                        lambda r: r["Intensity"] + offset_map[r["Sample"]],
-                        axis=1
+                    stocsy_model = st.selectbox(
+                        "Model",
+                        ["linear", "exponential", "sinusoidal", "sigmoid", "gaussian", "fft", "polynomial", "piecewise", "skewed_gauss"],
+                        index=0,
+                        key="stocsy_model_tab6",
                     )
 
-                    fig2 = px.line(
-                        plot_df,
-                        x="RT(min)",
-                        y="Intensity_offset",
-                        color="Sample",
-                        title="Stacked chromatograms"
-                    )
-                    fig2.update_layout(
-                        xaxis_title="RT (min)",
-                        yaxis_title=f"Intensity + offset (step={stack_step})"
-                    )
-                    st.plotly_chart(fig2, use_container_width=True)
+                    if st.button("Run STOCSY", key="run_stocsy_tab6"):
+                        target_for_run = float(new_axis.values[-1])
 
-                with t63:
-                    max_points = 5000
-                    sub = hplc_grid_df
-                    if len(hplc_grid_df) > max_points:
-                        sub = hplc_grid_df.iloc[:: int(np.ceil(len(hplc_grid_df) / max_points)), :]
+                        corr = covar = None
+                        if hasattr(dp, "STOCSY_LC_mode"):
+                            try:
+                                corr, covar = dp.STOCSY_LC_mode(target_for_run, MergeDF, new_axis, mode=stocsy_model)
+                            except Exception as e:
+                                st.warning(f"dp.STOCSY_LC_mode failed ({e}).")
 
-                    mat = sub[[c for c in sub.columns if c != "RT(min)"]].T.values
+                        if corr is None or covar is None:
+                            corr, covar = stocsy_linear(target_for_run, MergeDF, new_axis)
 
-                    fig3 = go.Figure(
-                        data=go.Heatmap(
-                            z=mat,
-                            x=sub["RT(min)"].values,
-                            y=[c for c in sub.columns if c != "RT(min)"],
-                            coloraxis="coloraxis"
+                        res = pd.DataFrame(
+                            {"RT(min)": new_axis.values, "Correlation": corr, "Covariance": covar}
                         )
-                    )
-                    fig3.update_layout(
-                        title="Intensity heatmap",
-                        xaxis_title="RT (min)",
-                        yaxis_title="Sample",
-                        coloraxis_colorscale="Viridis"
-                    )
-                    st.plotly_chart(fig3, use_container_width=True)
 
-                st.markdown("### 7. Downloads")
-                st.download_button(
-                    "Download processed HPLC matrix (CSV)",
-                    data=convert_df_to_csv(hplc_grid_df),
-                    file_name="hplc_processed_matrix.csv",
-                    mime="text/csv",
-                )
+                        with st.expander("STOCSY table", expanded=False):
+                            st.dataframe(res, use_container_width=True)
+
+                        figc = px.scatter(
+                            res,
+                            x="RT(min)",
+                            y="Covariance",
+                            color="Correlation",
+                            color_continuous_scale="Jet",
+                            render_mode="webgl",
+                            title="STOCSY: covariance colored by correlation",
+                        )
+                        figc.add_trace(
+                            go.Scatter(
+                                x=res["RT(min)"],
+                                y=res["Covariance"],
+                                mode="lines",
+                                line=dict(width=1),
+                                name="Covariance",
+                            )
+                        )
+                        st.plotly_chart(figc, use_container_width=True)
+
+                        st.download_button(
+                            "Download STOCSY table (CSV)",
+                            data=convert_df_to_csv(res),
+                            file_name="stocsy_tab6.csv",
+                            mime="text/csv",
+                        )
+
+            except Exception as e:
+                st.error(f"STOCSY setup failed: {e}")
 
 with tab7:
     st.subheader("Data Integration / Keq")
