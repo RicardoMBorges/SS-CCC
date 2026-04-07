@@ -1102,9 +1102,112 @@ Workflow:
         st.markdown("**Icoshift:** Interval correlation optimized shifting.")
         st.markdown("**PAFFT / RAFFT:** FFT-based alignment methods for RT correction.")
 
+        # IMPORTANT: do NOT include RT(min) as a sample for alignment
         sample_names = [c for c in align_source_tab6.columns if c != "RT(min)"]
+
+        with st.expander("Pre-alignment HPLC matrix", expanded=False):
+            st.dataframe(align_source_tab6, use_container_width=True)
+
+        # Quick pre-alignment overlay for debugging
+        plot_pre = align_source_tab6.melt(
+            id_vars="RT(min)",
+            var_name="Sample",
+            value_name="Intensity"
+        ).dropna(subset=["Intensity"])
+
+        fig_pre = px.line(
+            plot_pre,
+            x="RT(min)",
+            y="Intensity",
+            color="Sample",
+            title="Pre-alignment chromatograms"
+        )
+        st.plotly_chart(fig_pre, use_container_width=True)
+
         method, params = alignment_controls(align_source_tab6, sample_names=sample_names)
         df_aligned_tab6 = align_df(align_source_tab6, method, **params)
+
+        if df_aligned_tab6 is not None and not df_aligned_tab6.empty:
+            st.session_state["tab6_aligned_df"] = df_aligned_tab6
+
+            with st.expander("Post-alignment HPLC matrix", expanded=False):
+                st.dataframe(df_aligned_tab6, use_container_width=True)
+
+            # Diagnostics: if variance is ~0, alignment flattened the signal
+            sample_cols_aligned = [c for c in df_aligned_tab6.columns if c != "RT(min)"]
+            var_summary = pd.DataFrame({
+                "Sample": sample_cols_aligned,
+                "Variance": [pd.to_numeric(df_aligned_tab6[c], errors="coerce").var() for c in sample_cols_aligned],
+                "Min": [pd.to_numeric(df_aligned_tab6[c], errors="coerce").min() for c in sample_cols_aligned],
+                "Max": [pd.to_numeric(df_aligned_tab6[c], errors="coerce").max() for c in sample_cols_aligned],
+            })
+
+            with st.expander("Aligned signal diagnostics", expanded=False):
+                st.dataframe(var_summary, use_container_width=True)
+
+            plot_df = df_aligned_tab6.melt(
+                id_vars="RT(min)",
+                var_name="Sample",
+                value_name="Intensity"
+            ).dropna(subset=["Intensity"])
+
+            t61, t62, t63 = st.tabs(["Overlay", "Stacked", "Heatmap"])
+
+            with t61:
+                fig_overlay = px.line(
+                    plot_df,
+                    x="RT(min)",
+                    y="Intensity",
+                    color="Sample",
+                    title="Aligned chromatograms"
+                )
+                st.plotly_chart(fig_overlay, use_container_width=True)
+
+            with t62:
+                samples_sorted = sorted([c for c in df_aligned_tab6.columns if c != "RT(min)"])
+                stack_step = st.number_input(
+                    "Stack offset",
+                    value=2.0,
+                    step=0.5,
+                    key="stack_step_tab6_aligned",
+                )
+                offset_map = {s: i * stack_step for i, s in enumerate(samples_sorted)}
+                plot_df["Intensity_offset"] = plot_df.apply(
+                    lambda r: r["Intensity"] + offset_map[r["Sample"]],
+                    axis=1
+                )
+
+                fig_stack = px.line(
+                    plot_df,
+                    x="RT(min)",
+                    y="Intensity_offset",
+                    color="Sample",
+                    title="Stacked aligned chromatograms"
+                )
+                st.plotly_chart(fig_stack, use_container_width=True)
+
+            with t63:
+                max_points = 5000
+                sub = df_aligned_tab6
+                if len(df_aligned_tab6) > max_points:
+                    sub = df_aligned_tab6.iloc[:: int(np.ceil(len(df_aligned_tab6) / max_points)), :]
+
+                mat = sub[[c for c in sub.columns if c != "RT(min)"]].T.values
+                fig_heat = go.Figure(
+                    data=go.Heatmap(
+                        z=mat,
+                        x=sub["RT(min)"].values,
+                        y=[c for c in sub.columns if c != "RT(min)"],
+                        coloraxis="coloraxis"
+                    )
+                )
+                fig_heat.update_layout(
+                    title="Aligned intensity heatmap",
+                    xaxis_title="RT (min)",
+                    yaxis_title="Sample",
+                    coloraxis_colorscale="Viridis"
+                )
+                st.plotly_chart(fig_heat, use_container_width=True)
 
         if df_aligned_tab6 is not None and not df_aligned_tab6.empty:
             st.session_state["tab6_aligned_df"] = df_aligned_tab6
