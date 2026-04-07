@@ -1488,7 +1488,7 @@ is already encoded by the metadata generated inside `ss_ccc`.
 """
             )
 
-    processed_hplc_df = st.session_state.get("processed_hplc_tab6", None)
+    processed_hplc_df = st.session_state.get("tab6_preprocessed_df", None)
 
     if processed_hplc_df is None or processed_hplc_df.empty:
         st.info("First load and process HPLC data in tab 6.")
