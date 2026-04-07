@@ -1102,7 +1102,7 @@ Workflow:
         st.markdown("**Icoshift:** Interval correlation optimized shifting.")
         st.markdown("**PAFFT / RAFFT:** FFT-based alignment methods for RT correction.")
 
-        sample_names = list(align_source_tab6.columns[0:])
+        sample_names = [c for c in align_source_tab6.columns if c != "RT(min)"]
         method, params = alignment_controls(align_source_tab6, sample_names=sample_names)
         df_aligned_tab6 = align_df(align_source_tab6, method, **params)
 
