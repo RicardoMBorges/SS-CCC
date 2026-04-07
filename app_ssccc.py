@@ -9,6 +9,14 @@ from pathlib import Path
 from PIL import Image
 from typing import Dict, List, Tuple
 
+import data_processing_HPLC as dp
+from alignment_utils import alignment_controls, align_df
+
+try:
+    from pyicoshift import icoshift  # noqa: F401
+except Exception:
+    icoshift = None
+
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -632,7 +640,7 @@ tab0, tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(
         "3. Sample Preparation",
         "4. Labels & Metadata",
         "5. Future OT-2 Export",
-        "6. HPLC Import",
+        "6. HPLC / Metadata / BioActivity / STOCSY",
         "7. Data Integration / Keq",
     ]
 )
