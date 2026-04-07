@@ -226,12 +226,12 @@ def alignment_controls(df: pd.DataFrame, sample_names: list[str] | None = None):
     if st is None:
         raise RuntimeError("alignment_controls requires Streamlit")
 
-    method = st.selectbox("Alignment method", ["None", "Icoshift", "PAFFT", "RAFFT"], index=0)
+    method = st.selectbox("Alignment method", ["None", "Icoshift", "PAFFT", "RAFFT"], index=1)
 
     params = {}
     if method == "Icoshift":
         params["n_intervals"] = st.number_input("Icoshift: number of intervals", min_value=1, max_value=500, value=50, step=1)
-        params["target"] = st.selectbox("Icoshift target", ["maxcorr", "median", "first"], index=0)
+        params["target"] = st.selectbox("Icoshift target", ["median", "mean"], index=0)
 
     elif method in ("PAFFT", "RAFFT"):
         # Reference selection
