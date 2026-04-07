@@ -875,6 +875,25 @@ Workflow:
 """
         )
 
+    st.markdown("### 1. HPLC input mode")
+
+    hplc_mode_tab6 = st.radio(
+        "Select HPLC data type",
+        ["2D LabSolutions ASCII", "3D PDA ASCII"],
+        index=0,
+        key="hplc_mode_tab6",
+    )
+
+    target_wavelength_tab6 = 254.0
+    if hplc_mode_tab6 == "3D PDA ASCII":
+        target_wavelength_tab6 = st.number_input(
+            "Target wavelength (nm)",
+            min_value=190.0,
+            max_value=800.0,
+            value=254.0,
+            step=1.0,
+            key="target_wavelength_tab6",
+        )
     # -------------------------------------------------
     # 1) Uploads
     # -------------------------------------------------
@@ -934,36 +953,43 @@ Workflow:
     # -------------------------------------------------
     # 3) Metadata column mapping
     # -------------------------------------------------
-    col_sample = col_hplc = col_bio = None
+    # Fixed metadata column names expected in the UPDATED metadata file
+    col_sample = "sample_id"
+    col_hplc = "HPLC_filename"
+    col_bio = "BioActivity_filename"
 
     if meta_df_tab6 is not None:
-        cols = meta_df_tab6.columns.tolist()
+        required_meta_cols = [col_sample, col_hplc]
+        missing_meta_cols = [c for c in required_meta_cols if c not in meta_df_tab6.columns]
 
-        col_sample = st.selectbox(
-            "Sample ID column (matches chromatogram columns after mapping)",
-            options=cols,
-            index=cols.index("Samples") if "Samples" in cols else 0,
-            key="col_sample_tab6",
-        )
+        if missing_meta_cols:
+            st.error(
+                f"Uploaded metadata is missing required columns: {missing_meta_cols}"
+            )
+            st.stop()
 
-        default_hplc = "HPLC_filename" if "HPLC_filename" in cols else cols[0]
-        col_hplc = st.selectbox(
-            "Metadata column containing HPLC file stems",
-            options=cols,
-            index=cols.index(default_hplc),
-            key="col_hplc_tab6",
-        )
+        if col_bio not in meta_df_tab6.columns:
+            st.warning(
+                "Column 'BioActivity_filename' was not found in the uploaded metadata. "
+                "Bioactivity-linked STOCSY will not work until this column is added."
+            )
 
-        default_bio = "BioActivity_filename" if "BioActivity_filename" in cols else (
-            "BioAct_filename" if "BioAct_filename" in cols else None
-        )
+        with st.expander("Metadata column requirements", expanded=False):
+            st.markdown(
+                """
+The uploaded metadata must be the UPDATED file exported from tab 4 and edited by the user.
 
-        if default_bio is not None:
-            col_bio = st.selectbox(
-                "Metadata column containing BioActivity file stems",
-                options=cols,
-                index=cols.index(default_bio),
-                key="col_bio_tab6",
+Required columns:
+- `sample_id`
+- `HPLC_filename`
+
+Optional but needed for STOCSY with bioactivity:
+- `BioActivity_filename`
+
+Important:
+- `HPLC_filename` must match the imported ASCII file stem
+- do not use `.txt` in the mapping unless you use it consistently
+"""
             )
         else:
             st.warning("Metadata should contain a BioActivity_filename column for STOCSY with bioactivity.")
@@ -980,7 +1006,14 @@ Workflow:
         for f in hplc_uploads_tab6:
             try:
                 raw = f.getvalue()
-                df = parse_labsolutions_ascii(f.name, raw)
+                if hplc_mode_tab6 == "3D PDA ASCII":
+                    df = parse_labsolutions_ascii(
+                        f.name,
+                        raw,
+                        target_wavelength=float(target_wavelength_tab6),
+                    )
+                else:
+                    df = parse_labsolutions_ascii(f.name, raw)
                 parsed[f.name] = df
                 report_rows.append({"file": f.name, "status": "parsed", "rows": len(df)})
             except Exception as e:
@@ -992,18 +1025,6 @@ Workflow:
             st.dataframe(report_df, use_container_width=True)
 
         combined_tab6 = outer_join_rt(parsed) if parsed else None
-
-        if combined_tab6 is not None and meta_df_tab6 is not None and col_sample and col_hplc:
-            file_stems = [c for c in combined_tab6.columns if c != "RT(min)"]
-            name_map = {}
-
-            for _, row in meta_df_tab6.iterrows():
-                stem = str(row[col_hplc]).replace(".txt", "")
-                name_map[stem] = str(row[col_sample])
-
-            ren = {stem: name_map[stem] for stem in file_stems if stem in name_map}
-            if ren:
-                combined_tab6 = combined_tab6.rename(columns=ren)
 
         if combined_tab6 is not None and not combined_tab6.empty:
             with st.expander("Combined raw matrix", expanded=False):
