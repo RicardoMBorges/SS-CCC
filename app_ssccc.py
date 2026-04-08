@@ -1359,7 +1359,7 @@ Important:
                 )
                 st.plotly_chart(fig_heat, use_container_width=True)
 
-    if combined_tab6 is not None and meta_df_tab6 is not None:
+    if combined_tab6 is not None and meta_df_tab6 is not None and col_hplc in meta_df_tab6.columns:
         imported_hplc_names = set([c for c in combined_tab6.columns if c != "RT(min)"])
         metadata_hplc_names = set(
             meta_df_tab6["HPLC_filename"]
