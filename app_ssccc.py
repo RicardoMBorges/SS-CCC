@@ -1029,6 +1029,21 @@ Important:
         if combined_tab6 is not None and not combined_tab6.empty:
             with st.expander("Combined raw matrix", expanded=False):
                 st.dataframe(combined_tab6, use_container_width=True)
+            imported_hplc_names = [c for c in combined_tab6.columns if c != "RT(min)"]
+
+            with st.expander("Imported HPLC filenames detected in the combined matrix", expanded=False):
+                st.markdown(
+                    """
+These are the chromatogram names detected from the uploaded ASCII files.
+
+Write these exact names in the column `HPLC_filename`
+of the UPDATED metadata file.
+"""
+                )
+                st.dataframe(
+                    pd.DataFrame({"HPLC_filename_detected": imported_hplc_names}),
+                    use_container_width=True,
+                )
 
     # -------------------------------------------------
     # 5) Preprocessing
@@ -1321,6 +1336,33 @@ Important:
                 )
                 st.plotly_chart(fig_heat, use_container_width=True)
 
+    if combined_tab6 is not None and meta_df_tab6 is not None:
+        imported_hplc_names = set([c for c in combined_tab6.columns if c != "RT(min)"])
+        metadata_hplc_names = set(
+            meta_df_tab6["HPLC_filename"]
+            .astype(str)
+            .str.replace(".txt", "", regex=False)
+            .str.strip()
+        )
+
+        matched_hplc = sorted(imported_hplc_names & metadata_hplc_names)
+        missing_in_metadata = sorted(imported_hplc_names - metadata_hplc_names)
+        missing_in_imports = sorted(metadata_hplc_names - imported_hplc_names)
+
+        with st.expander("HPLC filename matching diagnostics", expanded=False):
+            st.markdown(f"Matched HPLC filenames: **{len(matched_hplc)}**")
+            st.markdown(f"Imported HPLC filenames missing in metadata: **{len(missing_in_metadata)}**")
+            st.markdown(f"Metadata HPLC filenames missing in uploads: **{len(missing_in_imports)}**")
+
+            if matched_hplc:
+                st.dataframe(pd.DataFrame({"matched": matched_hplc}), use_container_width=True)
+
+            if missing_in_metadata:
+                st.dataframe(pd.DataFrame({"missing_in_metadata": missing_in_metadata}), use_container_width=True)
+
+            if missing_in_imports:
+                st.dataframe(pd.DataFrame({"missing_in_imports": missing_in_imports}), use_container_width=True)
+    
     # -------------------------------------------------
     # 7) STOCSY
     # -------------------------------------------------
@@ -1339,12 +1381,12 @@ Important:
             try:
                 LC = df_aligned_tab6.drop(columns="RT(min)")
                 RT = df_aligned_tab6["RT(min)"]
-
+                
                 ordered_samples = meta_df_tab6[col_sample].astype(str).tolist()
-                ordered_hplc = meta_df_tab6[col_hplc].astype(str).str.replace(".txt", "", regex=False).tolist()
-                ordered_bio = meta_df_tab6[col_bio].astype(str).str.replace(".txt", "", regex=False).tolist()
+                ordered_hplc = meta_df_tab6[col_hplc].astype(str).str.replace(".txt", "", regex=False).str.strip().tolist()
+                ordered_bio = meta_df_tab6[col_bio].astype(str).str.replace(".txt", "", regex=False).str.strip().tolist()
 
-                present_samples = [s for s in ordered_samples if s in LC.columns.astype(str).tolist()]
+                hplc_columns = LC.columns.astype(str).tolist()
 
                 bio_df_tmp = bio_df_tab6.copy()
                 bio_cols = bio_df_tmp.columns.astype(str).str.replace(".txt", "", regex=False).tolist()
@@ -1355,17 +1397,20 @@ Important:
                         bio_cols = bio_df_tmp.columns.astype(str).str.replace(".txt", "", regex=False).tolist()
 
                 samples_ok = []
+                hplc_cols_needed = []
                 bio_cols_needed = []
 
-                for s, bb in zip(ordered_samples, ordered_bio):
-                    if s in present_samples and (bb in bio_cols):
+                for s, hh, bb in zip(ordered_samples, ordered_hplc, ordered_bio):
+                    if (hh in hplc_columns) and (bb in bio_cols):
                         samples_ok.append(s)
+                        hplc_cols_needed.append(hh)
                         bio_cols_needed.append(bb)
 
                 if len(samples_ok) == 0:
                     st.error("No overlapping samples between HPLC and BioActivity using the provided metadata.")
                 else:
-                    LC_ord = LC[samples_ok].copy()
+                    LC_ord = LC[hplc_cols_needed].copy()
+                    LC_ord.columns = samples_ok
 
                     picked = None
                     for r in range(bio_df_tmp.shape[0]):
