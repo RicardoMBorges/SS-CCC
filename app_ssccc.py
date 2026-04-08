@@ -565,26 +565,49 @@ def merge_auc_with_metadata(auc_df: pd.DataFrame, metadata_df: pd.DataFrame) -> 
     merged = pd.merge(meta, auc_df, on="HPLC_filename", how="left")
     return merged
 
-
 def calculate_keq_from_metadata(merged_auc_df: pd.DataFrame) -> pd.DataFrame:
     """
-    Pair FI and FS using ATTRIBUTE_CCC convention:
-    e.g. S1_FI and S1_FS
+    Pair FI and FS using:
+    - sample_id
+    - pair_id derived from ATTRIBUTE_CCC (e.g. S1 from S1_FI / S1_FS)
 
-    Calculates both FS/FI and FI/FS for each AUC region and total selected AUC.
+    Calculates both:
+    - FS / FI
+    - FI / FS
+
+    for every AUC region and for AUC_TOTAL_SELECTED.
     """
-    auc_cols = [c for c in merged_auc_df.columns if c.startswith("AUC_R")] + ["AUC_TOTAL_SELECTED"]
-    auc_cols = [c for c in auc_cols if c in merged_auc_df.columns]
+    df = merged_auc_df.copy()
+
+    required_cols = ["ATTRIBUTE_CCC", "HPLC_filename"]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"Missing required columns for Keq calculation: {missing}")
+
+    if "sample_id" not in df.columns:
+        df["sample_id"] = "sample_undefined"
+
+    df["sample_id"] = df["sample_id"].astype(str).str.strip()
+    df["ATTRIBUTE_CCC"] = df["ATTRIBUTE_CCC"].astype(str).str.strip()
+    df["HPLC_filename"] = df["HPLC_filename"].astype(str).str.replace(".txt", "", regex=False).str.strip()
+
+    auc_cols = [c for c in df.columns if c.startswith("AUC_R")]
+    if "AUC_TOTAL_SELECTED" in df.columns:
+        auc_cols.append("AUC_TOTAL_SELECTED")
+
+    # derive pair_id from ATTRIBUTE_CCC
+    df["pair_id"] = (
+        df["ATTRIBUTE_CCC"]
+        .str.replace("_FI", "", regex=False)
+        .str.replace("_FS", "", regex=False)
+    )
 
     pair_records = []
 
-    # base pair id = ATTRIBUTE_CCC without suffix _FI/_FS
-    temp = merged_auc_df.copy()
-    temp["pair_id"] = temp["ATTRIBUTE_CCC"].astype(str).str.replace("_FI", "", regex=False).str.replace("_FS", "", regex=False)
-
-    for pair_id, g in temp.groupby("pair_id"):
-        fi = g[g["ATTRIBUTE_CCC"].astype(str).str.endswith("_FI")]
-        fs = g[g["ATTRIBUTE_CCC"].astype(str).str.endswith("_FS")]
+    # IMPORTANT: group by sample_id + pair_id
+    for (sample_id, pair_id), g in df.groupby(["sample_id", "pair_id"], dropna=False):
+        fi = g[g["ATTRIBUTE_CCC"].str.endswith("_FI", na=False)]
+        fs = g[g["ATTRIBUTE_CCC"].str.endswith("_FS", na=False)]
 
         if fi.empty or fs.empty:
             continue
@@ -593,18 +616,20 @@ def calculate_keq_from_metadata(merged_auc_df: pd.DataFrame) -> pd.DataFrame:
         fs_row = fs.iloc[0]
 
         out = {
+            "sample_id": sample_id,
             "pair_id": pair_id,
-            "sample_id": fi_row.get("sample_id", ""),
-            "base_system": fi_row.get("base_system", ""),
+            "base_system": fi_row.get("base_system", fs_row.get("base_system", "")),
             "FI_tube_code": fi_row.get("tube_code", ""),
             "FS_tube_code": fs_row.get("tube_code", ""),
             "FI_file": fi_row.get("HPLC_filename", ""),
             "FS_file": fs_row.get("HPLC_filename", ""),
+            "FI_attribute": fi_row.get("ATTRIBUTE_CCC", ""),
+            "FS_attribute": fs_row.get("ATTRIBUTE_CCC", ""),
         }
 
         for col in auc_cols:
-            fi_val = fi_row.get(col, np.nan)
-            fs_val = fs_row.get(col, np.nan)
+            fi_val = pd.to_numeric(pd.Series([fi_row.get(col, np.nan)]), errors="coerce").iloc[0]
+            fs_val = pd.to_numeric(pd.Series([fs_row.get(col, np.nan)]), errors="coerce").iloc[0]
 
             out[f"{col}_FI"] = fi_val
             out[f"{col}_FS"] = fs_val
@@ -1872,6 +1897,21 @@ is already encoded by the metadata generated inside `ss_ccc`.
             if merged_auc_df is not None and not merged_auc_df.empty:
                 with st.expander("Merged metadata + AUC", expanded=False):
                     st.dataframe(merged_auc_df, use_container_width=True)
+                pair_preview = merged_auc_df.copy()
+                pair_preview["pair_id"] = (
+                    pair_preview["ATTRIBUTE_CCC"]
+                    .astype(str)
+                    .str.replace("_FI", "", regex=False)
+                    .str.replace("_FS", "", regex=False)
+                )
+
+                preview_cols = [c for c in ["sample_id", "pair_id", "ATTRIBUTE_CCC", "HPLC_filename"] if c in pair_preview.columns]
+
+                with st.expander("FI/FS pairing preview", expanded=False):
+                    st.dataframe(
+                        pair_preview[preview_cols].sort_values(preview_cols).reset_index(drop=True),
+                        use_container_width=True
+                    )
 
                 st.markdown("### 5. Keq calculation")
 
