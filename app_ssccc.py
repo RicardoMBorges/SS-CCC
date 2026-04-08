@@ -958,22 +958,25 @@ Workflow:
             st.dataframe(bio_df_tab6.head(10), use_container_width=True)
 
     # -------------------------------------------------
-    # 3) Metadata column mapping
+    # 3) Metadata column expectations
     # -------------------------------------------------
-    # Fixed metadata column names expected in the UPDATED metadata file
     col_sample = "sample_id"
     col_hplc = "HPLC_filename"
     col_bio = "BioActivity_filename"
 
     if meta_df_tab6 is not None:
-        required_meta_cols = [col_sample, col_hplc]
-        missing_meta_cols = [c for c in required_meta_cols if c not in meta_df_tab6.columns]
+        missing_for_mapping = [c for c in [col_hplc] if c not in meta_df_tab6.columns]
 
-        if missing_meta_cols:
-            st.error(
-                f"Uploaded metadata is missing required columns: {missing_meta_cols}"
+        if missing_for_mapping:
+            st.warning(
+                f"Uploaded metadata is missing column(s) needed for HPLC matching: {missing_for_mapping}"
             )
-            st.stop()
+
+        if col_sample not in meta_df_tab6.columns:
+            st.warning(
+                "Column 'sample_id' was not found in the uploaded metadata. "
+                "Chromatogram visualization can still work, but STOCSY/integration mapping will be limited."
+            )
 
         if col_bio not in meta_df_tab6.columns:
             st.warning(
@@ -984,13 +987,14 @@ Workflow:
         with st.expander("Metadata column requirements", expanded=False):
             st.markdown(
                 """
-The uploaded metadata must be the UPDATED file exported from tab 4 and edited by the user.
+For simple chromatogram import and visualization, metadata is optional.
 
-Required columns:
-- `sample_id`
+For metadata matching:
 - `HPLC_filename`
 
-Optional but needed for STOCSY with bioactivity:
+For STOCSY and full mapping:
+- `sample_id`
+- `HPLC_filename`
 - `BioActivity_filename`
 
 Important:
