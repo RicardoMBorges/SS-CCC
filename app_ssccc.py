@@ -1358,63 +1358,158 @@ of the UPDATED metadata file.
 
         if use_bio_driver and all(c in meta_df_tab6.columns for c in [col_sample, col_hplc, col_bio]):
             try:
-                LC = df_aligned_tab6.drop(columns="RT(min)")
-                RT = df_aligned_tab6["RT(min)"]
-                
-                ordered_samples = meta_df_tab6[col_sample].astype(str).tolist()
-                ordered_hplc = meta_df_tab6[col_hplc].astype(str).str.replace(".txt", "", regex=False).str.strip().tolist()
-                ordered_bio = meta_df_tab6[col_bio].astype(str).str.replace(".txt", "", regex=False).str.strip().tolist()
+                # -----------------------------
+                # Prepare aligned HPLC matrix
+                # -----------------------------
+                LC = df_aligned_tab6.drop(columns="RT(min)").copy()
+                RT = pd.to_numeric(df_aligned_tab6["RT(min)"], errors="coerce").reset_index(drop=True)
 
-                hplc_columns = LC.columns.astype(str).tolist()
+                hplc_columns = (
+                    pd.Index(LC.columns)
+                    .astype(str)
+                    .str.replace(".txt", "", regex=False)
+                    .str.strip()
+                    .tolist()
+                )
+                LC.columns = hplc_columns
 
+                # -----------------------------
+                # Prepare metadata mapping
+                # -----------------------------
+                meta_tmp = meta_df_tab6.copy()
+                meta_tmp[col_sample] = meta_tmp[col_sample].astype(str).str.strip()
+                meta_tmp[col_hplc] = (
+                    meta_tmp[col_hplc]
+                    .astype(str)
+                    .str.replace(".txt", "", regex=False)
+                    .str.strip()
+                )
+                meta_tmp[col_bio] = (
+                    meta_tmp[col_bio]
+                    .astype(str)
+                    .str.replace(".txt", "", regex=False)
+                    .str.strip()
+                )
+
+                # Keep only rows with all required mappings filled
+                meta_tmp = meta_tmp[
+                    (meta_tmp[col_sample] != "")
+                    & (meta_tmp[col_hplc] != "")
+                    & (meta_tmp[col_bio] != "")
+                ].copy()
+
+                # -----------------------------
+                # Prepare bioactivity table
+                # -----------------------------
                 bio_df_tmp = bio_df_tab6.copy()
-                bio_cols = bio_df_tmp.columns.astype(str).str.replace(".txt", "", regex=False).tolist()
+                bio_df_tmp.columns = (
+                    pd.Index(bio_df_tmp.columns)
+                    .astype(str)
+                    .str.replace(".txt", "", regex=False)
+                    .str.strip()
+                )
 
-                if not all(b in bio_cols for b in ordered_bio):
+                bio_cols = bio_df_tmp.columns.tolist()
+
+                # Optional first non-data column removal if needed
+                metadata_bio_names = meta_tmp[col_bio].tolist()
+                if not all(b in bio_cols for b in metadata_bio_names):
                     if bio_df_tmp.shape[1] > 1:
-                        bio_df_tmp = bio_df_tmp.iloc[:, 1:]
-                        bio_cols = bio_df_tmp.columns.astype(str).str.replace(".txt", "", regex=False).tolist()
+                        bio_df_tmp = bio_df_tmp.iloc[:, 1:].copy()
+                        bio_df_tmp.columns = (
+                            pd.Index(bio_df_tmp.columns)
+                            .astype(str)
+                            .str.replace(".txt", "", regex=False)
+                            .str.strip()
+                        )
+                        bio_cols = bio_df_tmp.columns.tolist()
 
+                # -----------------------------
+                # Match metadata to HPLC + BioActivity
+                # -----------------------------
                 samples_ok = []
                 hplc_cols_needed = []
                 bio_cols_needed = []
 
-                for s, hh, bb in zip(ordered_samples, ordered_hplc, ordered_bio):
-                    if (hh in hplc_columns) and (bb in bio_cols):
-                        samples_ok.append(s)
-                        hplc_cols_needed.append(hh)
-                        bio_cols_needed.append(bb)
+                for _, row in meta_tmp.iterrows():
+                    sample_name = row[col_sample]
+                    hplc_name = row[col_hplc]
+                    bio_name = row[col_bio]
+
+                    if (hplc_name in hplc_columns) and (bio_name in bio_cols):
+                        samples_ok.append(sample_name)
+                        hplc_cols_needed.append(hplc_name)
+                        bio_cols_needed.append(bio_name)
 
                 if len(samples_ok) == 0:
-                    st.error("No overlapping samples between HPLC and BioActivity using the provided metadata.")
+                    st.error(
+                        "No overlapping entries were found between aligned HPLC columns, "
+                        "metadata HPLC_filename, and bioactivity columns."
+                    )
                 else:
+                    # -----------------------------
+                    # Reorder HPLC matrix by metadata mapping
+                    # -----------------------------
                     LC_ord = LC[hplc_cols_needed].copy()
                     LC_ord.columns = samples_ok
 
+                    # -----------------------------
+                    # Pick one numeric bioactivity row
+                    # -----------------------------
                     picked = None
+                    picked_row_idx = None
+
                     for r in range(bio_df_tmp.shape[0]):
-                        vals = pd.to_numeric(bio_df_tmp[bio_cols_needed].iloc[r], errors="coerce")
+                        vals = pd.to_numeric(
+                            bio_df_tmp[bio_cols_needed].iloc[r],
+                            errors="coerce"
+                        )
                         if vals.notna().mean() > 0.8:
                             picked = vals.values.astype(float)
+                            picked_row_idx = r
                             break
+
                     if picked is None:
-                        picked = pd.to_numeric(
+                        vals = pd.to_numeric(
                             bio_df_tmp[bio_cols_needed].iloc[0],
                             errors="coerce"
-                        ).values.astype(float)
+                        )
+                        picked = vals.values.astype(float)
+                        picked_row_idx = 0
 
                     BioActdata = pd.DataFrame([picked], columns=bio_cols_needed)
-                    BioActdata.rename(columns={i: j for i, j in zip(bio_cols_needed, samples_ok)}, inplace=True)
+                    BioActdata.rename(
+                        columns={old: new for old, new in zip(bio_cols_needed, samples_ok)},
+                        inplace=True
+                    )
                     BioActdata = BioActdata[samples_ok]
 
+                    # -----------------------------
+                    # Merge HPLC + BioActivity
+                    # -----------------------------
                     MergeDF = pd.concat([LC_ord, BioActdata], ignore_index=True)
 
                     gap = float(RT.values[-1] - RT.values[-2]) if len(RT) >= 2 else 0.01
                     new_point = float(RT.values[-1]) + (gap if gap > 0 else 0.01)
                     new_axis = pd.concat([RT, pd.Series([new_point])], ignore_index=True)
 
-                    st.success(f"Merged HPLC ({LC_ord.shape[0]}) + BioAct (1) for {len(samples_ok)} sample(s).")
+                    st.success(
+                        f"Merged HPLC ({LC_ord.shape[0]} RT points) + BioAct (1 row) "
+                        f"for {len(samples_ok)} mapped sample(s)."
+                    )
 
+                    with st.expander("STOCSY mapping diagnostics", expanded=False):
+                        diag_df = pd.DataFrame({
+                            "sample_id": samples_ok,
+                            "HPLC_filename_used": hplc_cols_needed,
+                            "BioActivity_filename_used": bio_cols_needed,
+                        })
+                        st.dataframe(diag_df, use_container_width=True)
+                        st.caption(f"Bioactivity row used from uploaded table: row index {picked_row_idx}")
+
+                    # -----------------------------
+                    # STOCSY settings
+                    # -----------------------------
                     target_rt = st.number_input(
                         "Target RT (min)",
                         value=11.25,
@@ -1422,28 +1517,51 @@ of the UPDATED metadata file.
                         format="%.2f",
                         key="target_rt_tab6",
                     )
+
                     stocsy_model = st.selectbox(
                         "Model",
-                        ["linear", "exponential", "sinusoidal", "sigmoid", "gaussian", "fft", "polynomial", "piecewise", "skewed_gauss"],
+                        [
+                            "linear",
+                            "exponential",
+                            "sinusoidal",
+                            "sigmoid",
+                            "gaussian",
+                            "fft",
+                            "polynomial",
+                            "piecewise",
+                            "skewed_gauss",
+                        ],
                         index=0,
                         key="stocsy_model_tab6",
                     )
 
                     if st.button("Run STOCSY", key="run_stocsy_tab6"):
+                        # Important:
+                        # the appended last point corresponds to the BioActivity driver
                         target_for_run = float(new_axis.values[-1])
 
                         corr = covar = None
+
                         if hasattr(dp, "STOCSY_LC_mode"):
                             try:
-                                corr, covar = dp.STOCSY_LC_mode(target_for_run, MergeDF, new_axis, mode=stocsy_model)
+                                corr, covar = dp.STOCSY_LC_mode(
+                                    target_for_run,
+                                    MergeDF,
+                                    new_axis,
+                                    mode=stocsy_model
+                                )
                             except Exception as e:
-                                st.warning(f"dp.STOCSY_LC_mode failed ({e}).")
+                                st.warning(f"dp.STOCSY_LC_mode failed ({e}). Falling back to stocsy_linear().")
 
                         if corr is None or covar is None:
                             corr, covar = stocsy_linear(target_for_run, MergeDF, new_axis)
 
                         res = pd.DataFrame(
-                            {"RT(min)": new_axis.values, "Correlation": corr, "Covariance": covar}
+                            {
+                                "RT(min)": new_axis.values,
+                                "Correlation": corr,
+                                "Covariance": covar,
+                            }
                         )
 
                         with st.expander("STOCSY table", expanded=False):
@@ -1478,6 +1596,11 @@ of the UPDATED metadata file.
 
             except Exception as e:
                 st.error(f"STOCSY setup failed: {e}")
+
+        else:
+            st.info(
+                "STOCSY with bioactivity requires sample_id, HPLC_filename, and BioActivity_filename in the uploaded metadata."
+            )
 
 with tab7:
     st.subheader("Data Integration / Keq")
