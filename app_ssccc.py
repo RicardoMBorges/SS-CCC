@@ -932,6 +932,7 @@ Workflow:
     if meta_df_tab6 is not None:
         with st.expander("Metadata (head)", expanded=False):
             st.dataframe(meta_df_tab6.head(10), use_container_width=True)
+            st.session_state["uploaded_metadata_tab6"] = meta_df_tab6.copy()
 
     bio_df_tab6 = None
     if bio_file_tab6 is not None:
@@ -1021,6 +1022,7 @@ Important:
         if combined_tab6 is not None and not combined_tab6.empty:
             with st.expander("Combined raw matrix", expanded=False):
                 st.dataframe(combined_tab6, use_container_width=True)
+
             imported_hplc_names = [c for c in combined_tab6.columns if c != "RT(min)"]
 
             with st.expander("Imported HPLC filenames detected in the combined matrix", expanded=False):
@@ -1036,6 +1038,75 @@ of the UPDATED metadata file.
                     pd.DataFrame({"HPLC_filename_detected": imported_hplc_names}),
                     use_container_width=True,
                 )
+
+            # ---------------------------------------------
+            # Raw chromatogram preview (independent of STOCSY)
+            # ---------------------------------------------
+            st.markdown("### Raw chromatograms")
+
+            plot_raw = combined_tab6.melt(
+                id_vars="RT(min)",
+                var_name="Sample",
+                value_name="Intensity"
+            ).dropna(subset=["Intensity"])
+
+            raw_tab1, raw_tab2, raw_tab3 = st.tabs(["Overlay", "Stacked", "Heatmap"])
+
+            with raw_tab1:
+                fig_raw_overlay = px.line(
+                    plot_raw,
+                    x="RT(min)",
+                    y="Intensity",
+                    color="Sample",
+                    title="Raw imported chromatograms"
+                )
+                st.plotly_chart(fig_raw_overlay, use_container_width=True)
+
+            with raw_tab2:
+                samples_sorted_raw = sorted([c for c in combined_tab6.columns if c != "RT(min)"])
+                raw_stack_step = st.number_input(
+                    "Raw stack offset",
+                    value=2.0,
+                    step=0.5,
+                    key="raw_stack_step_tab6",
+                )
+                offset_map_raw = {s: i * raw_stack_step for i, s in enumerate(samples_sorted_raw)}
+                plot_raw["Intensity_offset"] = plot_raw.apply(
+                    lambda r: r["Intensity"] + offset_map_raw[r["Sample"]],
+                    axis=1
+                )
+
+                fig_raw_stack = px.line(
+                    plot_raw,
+                    x="RT(min)",
+                    y="Intensity_offset",
+                    color="Sample",
+                    title="Raw stacked chromatograms"
+                )
+                st.plotly_chart(fig_raw_stack, use_container_width=True)
+
+            with raw_tab3:
+                max_points_raw = 5000
+                sub_raw = combined_tab6
+                if len(combined_tab6) > max_points_raw:
+                    sub_raw = combined_tab6.iloc[:: int(np.ceil(len(combined_tab6) / max_points_raw)), :]
+
+                mat_raw = sub_raw[[c for c in sub_raw.columns if c != "RT(min)"]].T.values
+                fig_raw_heat = go.Figure(
+                    data=go.Heatmap(
+                        z=mat_raw,
+                        x=sub_raw["RT(min)"].values,
+                        y=[c for c in sub_raw.columns if c != "RT(min)"],
+                        coloraxis="coloraxis"
+                    )
+                )
+                fig_raw_heat.update_layout(
+                    title="Raw intensity heatmap",
+                    xaxis_title="RT (min)",
+                    yaxis_title="Sample",
+                    coloraxis_colorscale="Viridis"
+                )
+                st.plotly_chart(fig_raw_heat, use_container_width=True)
 
     # -------------------------------------------------
     # 5) Preprocessing
