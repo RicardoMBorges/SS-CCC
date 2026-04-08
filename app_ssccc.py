@@ -2163,8 +2163,14 @@ is already encoded by the metadata generated inside `ss_ccc`.
                         fi_row = fi_row.iloc[0]
                         fs_row = fs_row.iloc[0]
 
-                        fi_file = str(fi_row.get("HPLC_filename", "")).replace(".txt", "").strip()
-                        fs_file = str(fs_row.get("HPLC_filename", "")).replace(".txt", "").strip()
+                        # safer extraction of chromatogram names
+                        hplc_col = [c for c in pair_rows.columns if "HPLC_filename" in c][0]
+                        
+                        fi_file = fi_row[hplc_col]
+                        fs_file = fs_row[hplc_col]
+                        
+                        fi_file = "" if pd.isna(fi_file) else str(fi_file).replace(".txt", "").strip()
+                        fs_file = "" if pd.isna(fs_file) else str(fs_file).replace(".txt", "").strip()
 
                         st.markdown(
                             f"""
