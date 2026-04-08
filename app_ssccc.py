@@ -816,16 +816,16 @@ if can_build:
     frac_cols_current = [f"{s}_frac" for s in solvent_names]
     default_editor_df = renamed_systems_df_default[["System"] + frac_cols_current].copy()
 
-stored_final_df = st.session_state.get("finalized_systems_df", None)
+    stored_final_df = st.session_state.get("finalized_systems_df", None)
 
-if stored_final_df is not None:
-    renamed_systems_df = stored_final_df.copy()
-else:
-    renamed_systems_df = finalize_user_systems_table(
-        default_editor_df,
-        solvent_names=solvent_names,
-        total_volume_ml=total_volume_ml
-    )
+    if stored_final_df is not None:
+        renamed_systems_df = stored_final_df.copy()
+    else:
+        renamed_systems_df = finalize_user_systems_table(
+            default_editor_df,
+            solvent_names=solvent_names,
+            total_volume_ml=total_volume_ml
+        )
 
     phased_systems_df = expand_systems_to_phases(renamed_systems_df)
 
