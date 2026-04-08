@@ -1748,14 +1748,21 @@ Important:
                                 "Covariance": covar,
                             }
                         )
-
+                        
+                        # Normalize covariance for visualization
+                        max_abs = np.nanmax(np.abs(res["Covariance"]))
+                        if max_abs > 0:
+                            res["Covariance_norm"] = res["Covariance"] / max_abs
+                        else:
+                            res["Covariance_norm"] = res["Covariance"]
+                        
                         with st.expander("STOCSY table", expanded=False):
                             st.dataframe(res, use_container_width=True)
 
                         figc = px.scatter(
                             res,
                             x="RT(min)",
-                            y="Covariance",
+                            y="Covariance_norm",
                             color="Correlation",
                             color_continuous_scale="Jet",
                             render_mode="webgl",
@@ -1764,7 +1771,7 @@ Important:
                         figc.add_trace(
                             go.Scatter(
                                 x=res["RT(min)"],
-                                y=res["Covariance"],
+                                y=res["Covariance_norm"],
                                 mode="lines",
                                 line=dict(width=1),
                                 name="Covariance",
