@@ -1914,6 +1914,147 @@ is already encoded by the metadata generated inside `ss_ccc`.
                         use_container_width=True
                     )
 
+                st.markdown("### 5. Pair chromatogram viewer")
+
+                pair_view_df = merged_auc_df.copy()
+
+                if "ATTRIBUTE_CCC" in pair_view_df.columns:
+                    pair_view_df["pair_id"] = (
+                        pair_view_df["ATTRIBUTE_CCC"]
+                        .astype(str)
+                        .str.replace("_FI", "", regex=False)
+                        .str.replace("_FS", "", regex=False)
+                    )
+                else:
+                    pair_view_df["pair_id"] = ""
+
+                # Safer handling for single-sample or multi-sample datasets
+                if "sample_id" in pair_view_df.columns:
+                    available_samples = sorted(
+                        pair_view_df["sample_id"].dropna().astype(str).unique().tolist()
+                    )
+                else:
+                    available_samples = ["sample_undefined"]
+                    pair_view_df["sample_id"] = "sample_undefined"
+
+                selected_sample_for_pair = st.selectbox(
+                    "Select sample",
+                    options=available_samples,
+                    key="selected_sample_pair_tab7",
+                )
+
+                pair_candidates = sorted(
+                    pair_view_df.loc[
+                        pair_view_df["sample_id"].astype(str) == str(selected_sample_for_pair),
+                        "pair_id"
+                    ]
+                    .dropna()
+                    .astype(str)
+                    .unique()
+                    .tolist()
+                )
+
+                if len(pair_candidates) == 0:
+                    st.warning("No FI/FS pairs were found for the selected sample.")
+                else:
+                    selected_pair_id = st.selectbox(
+                        "Select pair (S#)",
+                        options=pair_candidates,
+                        key="selected_pair_id_tab7",
+                    )
+
+                    pair_rows = pair_view_df[
+                        (pair_view_df["sample_id"].astype(str) == str(selected_sample_for_pair)) &
+                        (pair_view_df["pair_id"].astype(str) == str(selected_pair_id))
+                    ].copy()
+
+                    fi_row = pair_rows[
+                        pair_rows["ATTRIBUTE_CCC"].astype(str).str.endswith("_FI", na=False)
+                    ]
+                    fs_row = pair_rows[
+                        pair_rows["ATTRIBUTE_CCC"].astype(str).str.endswith("_FS", na=False)
+                    ]
+
+                    if fi_row.empty or fs_row.empty:
+                        st.warning("Could not find both FI and FS rows for this pair.")
+                    else:
+                        fi_row = fi_row.iloc[0]
+                        fs_row = fs_row.iloc[0]
+
+                        fi_file = str(fi_row.get("HPLC_filename", "")).replace(".txt", "").strip()
+                        fs_file = str(fs_row.get("HPLC_filename", "")).replace(".txt", "").strip()
+
+                        st.markdown(
+                            f"""
+**Selected pair mapping**
+
+- **FS:** `{fs_row.get('ATTRIBUTE_CCC', '')}` → `{fs_file}`
+- **FI:** `{fi_row.get('ATTRIBUTE_CCC', '')}` → `{fi_file}`
+"""
+                        )
+
+                        available_hplc_cols = [c for c in processed_hplc_df.columns if c != "RT(min)"]
+
+                        missing_plot_cols = [c for c in [fs_file, fi_file] if c not in available_hplc_cols]
+
+                        if missing_plot_cols:
+                            st.error(
+                                f"These chromatogram names were not found in the processed HPLC matrix: {missing_plot_cols}"
+                            )
+                        else:
+                            pair_plot_df = processed_hplc_df[["RT(min)", fs_file, fi_file]].copy()
+
+                            pair_plot_long = pair_plot_df.melt(
+                                id_vars="RT(min)",
+                                var_name="Chromatogram",
+                                value_name="Intensity"
+                            ).dropna(subset=["Intensity"])
+
+                            viewer_mode = st.radio(
+                                "Pair plot mode",
+                                ["Overlay", "Stacked"],
+                                index=0,
+                                horizontal=True,
+                                key="pair_plot_mode_tab7",
+                            )
+
+                            if viewer_mode == "Overlay":
+                                fig_pair = px.line(
+                                    pair_plot_long,
+                                    x="RT(min)",
+                                    y="Intensity",
+                                    color="Chromatogram",
+                                    title=f"Pair chromatograms: {selected_pair_id} ({selected_sample_for_pair})"
+                                )
+                            else:
+                                pair_order = [fs_file, fi_file]
+                                offset_step_pair = st.number_input(
+                                    "Pair stack offset",
+                                    value=2.0,
+                                    step=0.5,
+                                    key="pair_stack_offset_tab7",
+                                )
+                                offset_map_pair = {name: i * offset_step_pair for i, name in enumerate(pair_order)}
+                                pair_plot_long["Intensity_offset"] = pair_plot_long.apply(
+                                    lambda r: r["Intensity"] + offset_map_pair[r["Chromatogram"]],
+                                    axis=1
+                                )
+
+                                fig_pair = px.line(
+                                    pair_plot_long,
+                                    x="RT(min)",
+                                    y="Intensity_offset",
+                                    color="Chromatogram",
+                                    title=f"Pair chromatograms: {selected_pair_id} ({selected_sample_for_pair})"
+                                )
+                                fig_pair.update_layout(height=700)
+
+                            fig_pair.update_layout(
+                                xaxis_title="RT (min)",
+                                yaxis_title="Intensity"
+                            )
+                            st.plotly_chart(fig_pair, use_container_width=True)
+                
                 st.markdown("### 5. Keq calculation")
 
                 if st.button("Calculate Keq (FS/FI and FI/FS)", key="calc_keq_tab7"):
