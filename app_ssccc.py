@@ -303,6 +303,30 @@ def build_future_ot2_table(metadata_df: pd.DataFrame, solvent_names: List[str]) 
     out["dispense_height_strategy"] = "TO_DEFINE"
     return out
 
+def finalize_user_systems_table(df_systems: pd.DataFrame, solvent_names: List[str], total_volume_ml: float) -> pd.DataFrame:
+    """
+    Accepts a user-edited solvent-system table containing *_frac columns,
+    normalizes each row to sum 1.0, and recalculates mL/uL columns.
+    """
+    df = df_systems.copy()
+
+    frac_cols = [f"{s}_frac" for s in solvent_names]
+
+    for col in frac_cols:
+        df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0.0)
+
+    row_sums = df[frac_cols].sum(axis=1).replace(0, np.nan)
+
+    # normalize rows to sum 1
+    df[frac_cols] = df[frac_cols].div(row_sums, axis=0).fillna(0.0)
+
+    for s in solvent_names:
+        df[f"{s}_mL"] = df[f"{s}_frac"] * float(total_volume_ml)
+        df[f"{s}_uL"] = df[f"{s}_mL"] * 1000.0
+
+    df["Total_mL"] = float(total_volume_ml)
+    return df
+
 # HPLC Import Helper
 def parse_labsolutions_ascii(file_name: str, raw_bytes: bytes, target_wavelength: float = 254.0) -> pd.DataFrame:
     """
@@ -782,12 +806,30 @@ renamed_systems_df = pd.DataFrame()
 prep_df = pd.DataFrame()
 metadata_df = pd.DataFrame()
 future_ot2_df = pd.DataFrame()
+phased_systems_df = pd.DataFrame()
 
 if can_build:
     systems_df = generate_five_systems(total_volume_ml=total_volume_ml)
-    renamed_systems_df = rename_solvent_columns(systems_df, solvent_names)
+    renamed_systems_df_default = rename_solvent_columns(systems_df, solvent_names)
 
-    # Expanded table for actual produced tubes: S1_sup, S1_inf ... S5_sup, S5_inf
+    frac_cols_current = [f"{s}_frac" for s in solvent_names]
+    default_editor_df = renamed_systems_df_default[["System"] + frac_cols_current].copy()
+
+    stored_editor_df = st.session_state.get("editable_systems_df", None)
+
+    if stored_editor_df is not None:
+        renamed_systems_df = finalize_user_systems_table(
+            stored_editor_df,
+            solvent_names=solvent_names,
+            total_volume_ml=total_volume_ml
+        )
+    else:
+        renamed_systems_df = finalize_user_systems_table(
+            default_editor_df,
+            solvent_names=solvent_names,
+            total_volume_ml=total_volume_ml
+        )
+
     phased_systems_df = expand_systems_to_phases(renamed_systems_df)
 
     prep_df = build_preparation_table(samples_df, phased_systems_df)
@@ -799,23 +841,61 @@ if can_build:
 # =========================================================
 with tab2:
     st.subheader("Proposed solvent systems")
-    with st.expander("How these 5 systems are being generated", expanded=True):
+    with st.expander("How this tab works", expanded=True):
         st.markdown(
-            "This is an initial placeholder design for 5 solvent systems using 4 selected solvents. "
-            "The current version distributes the compositions in a simple exploratory way so the app structure can be validated. "
-            "Later, this section can be replaced by a custom input table, experimental design strategy, or HEMWat-style logic."
+            """
+The app starts from a default 5-system proposal, but you can modify the solvent fractions manually.
+
+Rules:
+- edit only the fraction columns (`*_frac`)
+- each row will be automatically normalized to sum 1.0
+- mL and uL values will be recalculated from the selected total volume
+"""
         )
 
     if not can_build:
         st.info("Upload samples and select four different solvents to generate the systems.")
     else:
-        st.dataframe(renamed_systems_df, use_container_width=True)
-        fig = make_system_plot(renamed_systems_df, solvent_names)
+        frac_cols_current = [f"{s}_frac" for s in solvent_names]
+
+        default_editor_df = renamed_systems_df[["System"] + frac_cols_current].copy()
+
+        st.markdown("### Editable solvent-system fractions")
+
+        edited_systems_df = st.data_editor(
+            default_editor_df,
+            use_container_width=True,
+            num_rows="fixed",
+            key="editable_systems_editor_tab2",
+        )
+
+        edited_systems_df = edited_systems_df.copy()
+        st.session_state["editable_systems_df"] = edited_systems_df
+
+        finalized_systems_df = finalize_user_systems_table(
+            edited_systems_df,
+            solvent_names=solvent_names,
+            total_volume_ml=total_volume_ml
+        )
+
+        st.markdown("### Final solvent-system table")
+        st.dataframe(finalized_systems_df, use_container_width=True)
+
+        row_sums_check = finalized_systems_df[frac_cols_current].sum(axis=1)
+        check_df = pd.DataFrame({
+            "System": finalized_systems_df["System"],
+            "Fraction_sum": row_sums_check
+        })
+
+        with st.expander("Row sum check", expanded=False):
+            st.dataframe(check_df, use_container_width=True)
+
+        fig = make_system_plot(finalized_systems_df, solvent_names)
         st.plotly_chart(fig, use_container_width=True)
 
         st.download_button(
             "Download solvent systems table (CSV)",
-            data=convert_df_to_csv(renamed_systems_df),
+            data=convert_df_to_csv(finalized_systems_df),
             file_name="ccc_solvent_systems.csv",
             mime="text/csv",
         )
