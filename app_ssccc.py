@@ -1755,12 +1755,14 @@ Important:
                             res["Covariance_norm"] = res["Covariance"] / max_abs
                         else:
                             res["Covariance_norm"] = res["Covariance"]
+
+                        res_plot = res.iloc[:-1].copy()
                         
                         with st.expander("STOCSY table", expanded=False):
                             st.dataframe(res, use_container_width=True)
 
                         figc = px.scatter(
-                            res,
+                            res_plot,
                             x="RT(min)",
                             y="Covariance_norm",
                             color="Correlation",
@@ -1770,8 +1772,8 @@ Important:
                         )
                         figc.add_trace(
                             go.Scatter(
-                                x=res["RT(min)"],
-                                y=res["Covariance_norm"],
+                                x=res_plot["RT(min)"],
+                                y=res_plot["Covariance_norm"],
                                 mode="lines",
                                 line=dict(width=1),
                                 name="Covariance",
