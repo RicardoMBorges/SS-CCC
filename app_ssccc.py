@@ -358,12 +358,18 @@ def parse_labsolutions_ascii(file_name: str, raw_bytes: bytes, target_wavelength
         wl_tokens = re.split(r"\s+", wl_line)
         wl_tokens = [w for w in wl_tokens if w != ""]
 
-        wavelengths = pd.to_numeric(pd.Series(wl_tokens), errors="coerce").dropna().tolist()
+        wavelengths = pd.to_numeric(pd.Series(wl_tokens), errors="coerce").dropna().astype(float).tolist()
         if len(wavelengths) == 0:
             raise ValueError("Could not parse wavelength axis from PDA 3D file.")
 
+        # Some LabSolutions PDA exports store wavelength as nm*100
+        # Example: 25497 means 254.97 nm
+        if max(wavelengths) > 1000:
+            wavelengths = [w / 100.0 for w in wavelengths]
+
         target_wl = float(target_wavelength)
         wl_idx = int(np.argmin(np.abs(np.array(wavelengths) - target_wl)))
+        selected_wavelength = wavelengths[wl_idx]
 
         data_rows = []
         for line in lines[rt_header_idx + 2:]:
@@ -389,6 +395,12 @@ def parse_labsolutions_ascii(file_name: str, raw_bytes: bytes, target_wavelength
 
         df = pd.DataFrame(data_rows, columns=["RT(min)", base])
         df = df[df["RT(min)"].notna()].reset_index(drop=True)
+
+        # store parsing metadata for debugging
+        df.attrs["selected_wavelength_nm"] = selected_wavelength
+        df.attrs["n_time_points"] = len(df)
+        df.attrs["n_wavelength_points"] = len(wavelengths)
+
         return df
 
     raise ValueError(
@@ -999,19 +1011,38 @@ Important:
         for f in hplc_uploads_tab6:
             try:
                 raw = f.getvalue()
+
                 if hplc_mode_tab6 == "3D PDA ASCII":
                     df = parse_labsolutions_ascii(
                         f.name,
                         raw,
                         target_wavelength=float(target_wavelength_tab6),
                     )
+                    selected_wl = df.attrs.get("selected_wavelength_nm", np.nan)
+                    n_wl = df.attrs.get("n_wavelength_points", np.nan)
                 else:
                     df = parse_labsolutions_ascii(f.name, raw)
-                parsed[f.name] = df
-                report_rows.append({"file": f.name, "status": "parsed", "rows": len(df)})
-            except Exception as e:
-                report_rows.append({"file": f.name, "status": f"error: {e}", "rows": 0})
+                    selected_wl = np.nan
+                    n_wl = np.nan
 
+                parsed[f.name] = df
+
+                report_rows.append({
+                    "file": f.name,
+                    "status": "parsed",
+                    "rows": len(df),
+                    "selected_wavelength_nm": selected_wl,
+                    "n_wavelength_points": n_wl,
+                })
+
+            except Exception as e:
+                report_rows.append({
+                    "file": f.name,
+                    "status": f"error: {e}",
+                    "rows": 0,
+                    "selected_wavelength_nm": np.nan,
+                    "n_wavelength_points": np.nan,
+                })
         report_df = pd.DataFrame(report_rows)
 
         with st.expander("Parsing report", expanded=False):
@@ -1019,6 +1050,16 @@ Important:
 
         combined_tab6 = outer_join_rt(parsed) if parsed else None
 
+        if not parsed:
+            st.error("No chromatogram was parsed successfully.")
+            st.stop()
+
+        if combined_tab6 is None or combined_tab6.empty:
+            st.error("combined_tab6 was not created. Parsing succeeded for zero usable chromatograms.")
+            st.write("Parsed keys:", list(parsed.keys()))
+            st.stop()
+        st.caption(f"combined_tab6 shape: {combined_tab6.shape if combined_tab6 is not None else None}")
+        
         n_parsed = sum(1 for r in report_rows if str(r["status"]) == "parsed")
 
         if n_parsed == 0:
