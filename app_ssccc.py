@@ -5,6 +5,7 @@ import os
 import re
 import zipfile
 import math
+import mpld3
 from pathlib import Path
 from PIL import Image
 from typing import Dict, List, Tuple
