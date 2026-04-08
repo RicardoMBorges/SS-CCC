@@ -415,6 +415,27 @@ def outer_join_rt(dfs: dict) -> pd.DataFrame:
         combined = combined.sort_values("RT(min)").reset_index(drop=True)
     return combined
 
+def import_uploaded_pda_files_with_dp(uploaded_files, target_wavelength: float):
+    import tempfile
+    import shutil
+
+    tmpdir = tempfile.mkdtemp(prefix="ssccc_pda_")
+    try:
+        for f in uploaded_files:
+            data = f.getvalue()
+            out_path = os.path.join(tmpdir, os.path.basename(f.name))
+            with open(out_path, "wb") as out:
+                out.write(data)
+
+        combined_3d = dp.import_3D_data(
+            tmpdir,
+            target_wavelength=float(target_wavelength),
+            output_filename=f"combined_{int(target_wavelength)}nm.csv"
+        )
+        return combined_3d
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
 def resample_to_grid(df: pd.DataFrame, step: float, rt_min=None, rt_max=None):
     if df is None or df.empty or "RT(min)" not in df.columns:
         return None, None
