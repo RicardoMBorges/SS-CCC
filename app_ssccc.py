@@ -1266,11 +1266,6 @@ of the UPDATED metadata file.
                 )
                 st.plotly_chart(fig_heat, use_container_width=True)
 
-        if df_aligned_tab6 is not None and not df_aligned_tab6.empty:
-            st.session_state["tab6_aligned_df"] = df_aligned_tab6
-
-            with st.expander("Aligned HPLC matrix", expanded=False):
-                st.dataframe(df_aligned_tab6, use_container_width=True)
 
             plot_df = df_aligned_tab6.melt(
                 id_vars="RT(min)",
