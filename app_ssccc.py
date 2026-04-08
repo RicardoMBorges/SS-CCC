@@ -1019,6 +1019,21 @@ Important:
 
         combined_tab6 = outer_join_rt(parsed) if parsed else None
 
+        n_parsed = sum(1 for r in report_rows if str(r["status"]) == "parsed")
+
+        if n_parsed == 0:
+            st.error(
+                "No HPLC files were successfully parsed. Open 'Parsing report' and inspect the error messages."
+            )
+            st.stop()
+
+        if combined_tab6 is None or combined_tab6.empty:
+            st.error(
+                "HPLC files were uploaded, but the combined chromatogram matrix is empty. "
+                "Check the parsing mode (2D vs 3D PDA), the target wavelength, and the file format."
+            )
+            st.stop()
+        
         if combined_tab6 is not None and not combined_tab6.empty:
             with st.expander("Combined raw matrix", expanded=False):
                 st.dataframe(combined_tab6, use_container_width=True)
