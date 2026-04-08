@@ -1340,7 +1340,7 @@ Important:
                 samples_sorted = sorted([c for c in df_aligned_tab6.columns if c != "RT(min)"])
                 stack_step = st.number_input(
                     "Stack offset",
-                    value=2.0,
+                    value=0.02,
                     step=0.5,
                     key="stack_step_tab6_aligned",
                 )
