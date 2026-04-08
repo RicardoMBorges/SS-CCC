@@ -1002,11 +1002,16 @@ Important:
     # -------------------------------------------------
     # 4) Parse HPLC uploads
     # -------------------------------------------------
+    # -------------------------------------------------
+    # 4) Parse HPLC uploads
+    # -------------------------------------------------
     combined_tab6 = None
 
     if hplc_uploads_tab6:
         parsed = {}
         report_rows = []
+
+        st.markdown("### Parsing debug")
 
         for f in hplc_uploads_tab6:
             try:
@@ -1025,12 +1030,23 @@ Important:
                     selected_wl = np.nan
                     n_wl = np.nan
 
+                # force numeric cleanup
+                df = df.copy()
+                df["RT(min)"] = pd.to_numeric(df["RT(min)"], errors="coerce")
+                sample_col = [c for c in df.columns if c != "RT(min)"][0]
+                df[sample_col] = pd.to_numeric(df[sample_col], errors="coerce")
+                df = df.dropna(subset=["RT(min)"]).reset_index(drop=True)
+
                 parsed[f.name] = df
 
                 report_rows.append({
                     "file": f.name,
                     "status": "parsed",
                     "rows": len(df),
+                    "rt_min": float(df["RT(min)"].min()) if len(df) else np.nan,
+                    "rt_max": float(df["RT(min)"].max()) if len(df) else np.nan,
+                    "signal_min": float(df[sample_col].min()) if len(df) else np.nan,
+                    "signal_max": float(df[sample_col].max()) if len(df) else np.nan,
                     "selected_wavelength_nm": selected_wl,
                     "n_wavelength_points": n_wl,
                 })
@@ -1040,130 +1056,84 @@ Important:
                     "file": f.name,
                     "status": f"error: {e}",
                     "rows": 0,
+                    "rt_min": np.nan,
+                    "rt_max": np.nan,
+                    "signal_min": np.nan,
+                    "signal_max": np.nan,
                     "selected_wavelength_nm": np.nan,
                     "n_wavelength_points": np.nan,
                 })
+
         report_df = pd.DataFrame(report_rows)
 
-        with st.expander("Parsing report", expanded=False):
+        with st.expander("Parsing report", expanded=True):
             st.dataframe(report_df, use_container_width=True)
 
-        combined_tab6 = outer_join_rt(parsed) if parsed else None
+        n_parsed = int((report_df["status"] == "parsed").sum())
 
-        if not parsed:
-            st.error("No chromatogram was parsed successfully.")
-            st.stop()
-
-        if combined_tab6 is None or combined_tab6.empty:
-            st.error("combined_tab6 was not created. Parsing succeeded for zero usable chromatograms.")
-            st.write("Parsed keys:", list(parsed.keys()))
-            st.stop()
-        st.caption(f"combined_tab6 shape: {combined_tab6.shape if combined_tab6 is not None else None}")
-        
-        n_parsed = sum(1 for r in report_rows if str(r["status"]) == "parsed")
+        st.write("Number of successfully parsed files:", n_parsed)
+        st.write("Parsed dictionary keys:", list(parsed.keys()))
 
         if n_parsed == 0:
             st.error(
-                "No HPLC files were successfully parsed. Open 'Parsing report' and inspect the error messages."
+                "No HPLC files were successfully parsed. Check the parsing report above."
             )
             st.stop()
 
-        if combined_tab6 is None or combined_tab6.empty:
-            st.error(
-                "HPLC files were uploaded, but the combined chromatogram matrix is empty. "
-                "Check the parsing mode (2D vs 3D PDA), the target wavelength, and the file format."
-            )
+        # show first parsed dataframe explicitly
+        first_key = next(iter(parsed.keys()))
+        st.write("First parsed file:", first_key)
+        with st.expander("First parsed dataframe preview", expanded=True):
+            st.dataframe(parsed[first_key].head(20), use_container_width=True)
+
+        combined_tab6 = outer_join_rt(parsed)
+
+        st.write("combined_tab6 is None:", combined_tab6 is None)
+
+        if combined_tab6 is None:
+            st.error("combined_tab6 is None after outer_join_rt(parsed).")
             st.stop()
+
+        st.write("combined_tab6 shape:", combined_tab6.shape)
+
+        if combined_tab6.empty:
+            st.error("combined_tab6 exists but is empty.")
+            st.stop()
+
+        with st.expander("Combined raw matrix", expanded=True):
+            st.dataframe(combined_tab6.head(50), use_container_width=True)
+
+        imported_hplc_names = [c for c in combined_tab6.columns if c != "RT(min)"]
+
+        with st.expander("Imported HPLC filenames detected in the combined matrix", expanded=True):
+            st.dataframe(
+                pd.DataFrame({"HPLC_filename_detected": imported_hplc_names}),
+                use_container_width=True,
+            )
+
+        st.markdown("### Raw chromatograms")
+
+        plot_raw = combined_tab6.melt(
+            id_vars="RT(min)",
+            var_name="Sample",
+            value_name="Intensity"
+        ).dropna(subset=["Intensity"])
+
+        st.write("plot_raw shape:", plot_raw.shape)
+
+        if plot_raw.empty:
+            st.error("plot_raw is empty after melt().")
+            st.stop()
+
+        fig_raw_overlay = px.line(
+            plot_raw,
+            x="RT(min)",
+            y="Intensity",
+            color="Sample",
+            title="Raw imported chromatograms"
+        )
+        st.plotly_chart(fig_raw_overlay, use_container_width=True)
         
-        if combined_tab6 is not None and not combined_tab6.empty:
-            with st.expander("Combined raw matrix", expanded=False):
-                st.dataframe(combined_tab6, use_container_width=True)
-
-            imported_hplc_names = [c for c in combined_tab6.columns if c != "RT(min)"]
-
-            with st.expander("Imported HPLC filenames detected in the combined matrix", expanded=False):
-                st.markdown(
-                    """
-These are the chromatogram names detected from the uploaded ASCII files.
-
-Write these exact names in the column `HPLC_filename`
-of the UPDATED metadata file.
-"""
-                )
-                st.dataframe(
-                    pd.DataFrame({"HPLC_filename_detected": imported_hplc_names}),
-                    use_container_width=True,
-                )
-
-            # ---------------------------------------------
-            # Raw chromatogram preview (independent of STOCSY)
-            # ---------------------------------------------
-            st.markdown("### Raw chromatograms")
-
-            plot_raw = combined_tab6.melt(
-                id_vars="RT(min)",
-                var_name="Sample",
-                value_name="Intensity"
-            ).dropna(subset=["Intensity"])
-
-            raw_tab1, raw_tab2, raw_tab3 = st.tabs(["Overlay", "Stacked", "Heatmap"])
-
-            with raw_tab1:
-                fig_raw_overlay = px.line(
-                    plot_raw,
-                    x="RT(min)",
-                    y="Intensity",
-                    color="Sample",
-                    title="Raw imported chromatograms"
-                )
-                st.plotly_chart(fig_raw_overlay, use_container_width=True)
-
-            with raw_tab2:
-                samples_sorted_raw = sorted([c for c in combined_tab6.columns if c != "RT(min)"])
-                raw_stack_step = st.number_input(
-                    "Raw stack offset",
-                    value=2.0,
-                    step=0.5,
-                    key="raw_stack_step_tab6",
-                )
-                offset_map_raw = {s: i * raw_stack_step for i, s in enumerate(samples_sorted_raw)}
-                plot_raw["Intensity_offset"] = plot_raw.apply(
-                    lambda r: r["Intensity"] + offset_map_raw[r["Sample"]],
-                    axis=1
-                )
-
-                fig_raw_stack = px.line(
-                    plot_raw,
-                    x="RT(min)",
-                    y="Intensity_offset",
-                    color="Sample",
-                    title="Raw stacked chromatograms"
-                )
-                st.plotly_chart(fig_raw_stack, use_container_width=True)
-
-            with raw_tab3:
-                max_points_raw = 5000
-                sub_raw = combined_tab6
-                if len(combined_tab6) > max_points_raw:
-                    sub_raw = combined_tab6.iloc[:: int(np.ceil(len(combined_tab6) / max_points_raw)), :]
-
-                mat_raw = sub_raw[[c for c in sub_raw.columns if c != "RT(min)"]].T.values
-                fig_raw_heat = go.Figure(
-                    data=go.Heatmap(
-                        z=mat_raw,
-                        x=sub_raw["RT(min)"].values,
-                        y=[c for c in sub_raw.columns if c != "RT(min)"],
-                        coloraxis="coloraxis"
-                    )
-                )
-                fig_raw_heat.update_layout(
-                    title="Raw intensity heatmap",
-                    xaxis_title="RT (min)",
-                    yaxis_title="Sample",
-                    coloraxis_colorscale="Viridis"
-                )
-                st.plotly_chart(fig_raw_heat, use_container_width=True)
-
     # -------------------------------------------------
     # 5) Preprocessing
     # -------------------------------------------------
@@ -1328,63 +1298,6 @@ of the UPDATED metadata file.
             ).dropna(subset=["Intensity"])
 
             t61, t62, t63 = st.tabs(["Overlay", "Stacked", "Heatmap"])
-
-            with t61:
-                fig_overlay = px.line(
-                    plot_df,
-                    x="RT(min)",
-                    y="Intensity",
-                    color="Sample",
-                    title="Aligned chromatograms"
-                )
-                st.plotly_chart(fig_overlay, use_container_width=True)
-
-            with t62:
-                samples_sorted = sorted([c for c in df_aligned_tab6.columns if c != "RT(min)"])
-                stack_step = st.number_input(
-                    "Stack offset",
-                    value=2.0,
-                    step=0.5,
-                    key="stack_step_tab6_aligned",
-                )
-                offset_map = {s: i * stack_step for i, s in enumerate(samples_sorted)}
-                plot_df["Intensity_offset"] = plot_df.apply(
-                    lambda r: r["Intensity"] + offset_map[r["Sample"]],
-                    axis=1
-                )
-
-                fig_stack = px.line(
-                    plot_df,
-                    x="RT(min)",
-                    y="Intensity_offset",
-                    color="Sample",
-                    title="Stacked aligned chromatograms"
-                )
-                st.plotly_chart(fig_stack, use_container_width=True)
-
-            with t63:
-                max_points = 5000
-                sub = df_aligned_tab6
-                if len(df_aligned_tab6) > max_points:
-                    sub = df_aligned_tab6.iloc[:: int(np.ceil(len(df_aligned_tab6) / max_points)), :]
-
-                mat = sub[[c for c in sub.columns if c != "RT(min)"]].T.values
-                fig_heat = go.Figure(
-                    data=go.Heatmap(
-                        z=mat,
-                        x=sub["RT(min)"].values,
-                        y=[c for c in sub.columns if c != "RT(min)"],
-                        coloraxis="coloraxis"
-                    )
-                )
-                fig_heat.update_layout(
-                    title="Aligned intensity heatmap",
-                    xaxis_title="RT (min)",
-                    yaxis_title="Sample",
-                    coloraxis_colorscale="Viridis"
-                )
-                st.plotly_chart(fig_heat, use_container_width=True)
-
 
             with t61:
                 fig_overlay = px.line(
