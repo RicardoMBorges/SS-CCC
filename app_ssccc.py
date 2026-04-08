@@ -1340,7 +1340,7 @@ Important:
                 samples_sorted = sorted([c for c in df_aligned_tab6.columns if c != "RT(min)"])
                 stack_step = st.number_input(
                     "Stack offset",
-                    value=0.02,
+                    value=2.0,
                     step=0.5,
                     key="stack_step_tab6_aligned",
                 )
@@ -1349,13 +1349,16 @@ Important:
                     lambda r: r["Intensity"] + offset_map[r["Sample"]],
                     axis=1
                 )
-
+            
                 fig_stack = px.line(
                     plot_df,
                     x="RT(min)",
                     y="Intensity_offset",
                     color="Sample",
                     title="Stacked aligned chromatograms"
+                )
+                fig_stack.update_layout(
+                    height=max(800, 120 * len(samples_sorted))
                 )
                 st.plotly_chart(fig_stack, use_container_width=True)
 
@@ -1826,6 +1829,9 @@ is already encoded by the metadata generated inside `ss_ccc`.
                 y="Intensity_offset",
                 color="Sample",
                 title="Stacked chromatogram preview with integration regions"
+            )
+            fig_preview.update_layout(
+                height=max(800, 120 * len(samples_sorted))
             )
 
         fig_preview = add_region_overlays(fig_preview, region_rows)
