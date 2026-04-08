@@ -505,6 +505,23 @@ def baseline_subtract(arr: np.ndarray, method: str, param: float) -> np.ndarray:
         return arr - s
     return arr
 
+def clip_rt_window(df: pd.DataFrame, rt_start: float | None, rt_end: float | None) -> pd.DataFrame:
+    """
+    Clip chromatograms to a selected RT interval.
+    Keeps only rows where RT(min) is within [rt_start, rt_end].
+    """
+    if df is None or df.empty or "RT(min)" not in df.columns:
+        return df
+
+    out = df.copy()
+    out["RT(min)"] = pd.to_numeric(out["RT(min)"], errors="coerce")
+
+    if rt_start is not None:
+        out = out[out["RT(min)"] >= float(rt_start)]
+    if rt_end is not None:
+        out = out[out["RT(min)"] <= float(rt_end)]
+
+    return out.reset_index(drop=True)
 
 def normalize_trace(arr: np.ndarray, mode: str) -> np.ndarray:
     if mode == "none":
@@ -1345,26 +1362,67 @@ Important:
                 key="norm_mode_tab6_main",
             )
         with c6:
-            rt_range_tab6 = st.text_input(
-                "RT range (min,max) or blank",
-                value="",
-                key="rt_range_tab6_main",
+            use_rt_clip_tab6 = st.checkbox(
+                "Clip chromatograms to RT window",
+                value=False,
+                key="use_rt_clip_tab6",
             )
+        
+        clip_start_tab6 = None
+        clip_end_tab6 = None
+        
+        if use_rt_clip_tab6:
+            cc1, cc2 = st.columns(2)
+            with cc1:
+                clip_start_tab6 = st.number_input(
+                    "Clip start RT (min)",
+                    value=float(combined_tab6["RT(min)"].min()),
+                    step=0.1,
+                    key="clip_start_tab6",
+                )
+            with cc2:
+                clip_end_tab6 = st.number_input(
+                    "Clip end RT (min)",
+                    value=float(combined_tab6["RT(min)"].max()),
+                    step=0.1,
+                    key="clip_end_tab6",
+                )
+        
+            if clip_end_tab6 <= clip_start_tab6:
+                st.warning("Clip end RT must be greater than clip start RT.")
 
-        rt_min = rt_max = None
-        if rt_range_tab6.strip():
-            try:
-                parts = [float(x) for x in rt_range_tab6.split(",")]
-                if len(parts) == 2:
-                    rt_min, rt_max = parts
-            except Exception:
-                st.warning("RT range not parsed. Use format like: 0.5,45")
-
+        clip_source_tab6 = combined_tab6.copy()
+        
+        if use_rt_clip_tab6 and clip_start_tab6 is not None and clip_end_tab6 is not None and clip_end_tab6 > clip_start_tab6:
+            clip_source_tab6 = clip_rt_window(
+                combined_tab6,
+                rt_start=float(clip_start_tab6),
+                rt_end=float(clip_end_tab6),
+            )
+        
+            with st.expander("Clipped HPLC matrix", expanded=False):
+                st.dataframe(clip_source_tab6, use_container_width=True)
+        
+            plot_clipped = clip_source_tab6.melt(
+                id_vars="RT(min)",
+                var_name="Sample",
+                value_name="Intensity"
+            ).dropna(subset=["Intensity"])
+        
+            fig_clipped = px.line(
+                plot_clipped,
+                x="RT(min)",
+                y="Intensity",
+                color="Sample",
+                title=f"Clipped chromatograms ({clip_start_tab6:.2f}–{clip_end_tab6:.2f} min)"
+            )
+            st.plotly_chart(fig_clipped, use_container_width=True)
+        
         df_grid_tab6, _ = resample_to_grid(
-            combined_tab6,
+            clip_source_tab6,
             step=float(grid_step_tab6),
-            rt_min=rt_min,
-            rt_max=rt_max,
+            rt_min=None,
+            rt_max=None,
         )
 
         if df_grid_tab6 is not None and not df_grid_tab6.empty:
