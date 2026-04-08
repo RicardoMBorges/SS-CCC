@@ -544,9 +544,10 @@ def integrate_regions_from_df(hplc_df: pd.DataFrame, regions: list[dict]) -> pd.
         for i, reg in enumerate(regions, start=1):
             mask = (rt >= reg["rt_start"]) & (rt <= reg["rt_end"])
             if np.sum(mask) >= 2:
-                auc = float(np.trapz(y[mask], rt[mask]))
+                auc = float(np.trapezoid(y[mask], rt[mask]))
             else:
                 auc = np.nan
+
             row[f"AUC_R{i}"] = auc
             total_auc += 0.0 if pd.isna(auc) else auc
 
