@@ -816,20 +816,16 @@ if can_build:
     frac_cols_current = [f"{s}_frac" for s in solvent_names]
     default_editor_df = renamed_systems_df_default[["System"] + frac_cols_current].copy()
 
-    stored_editor_df = st.session_state.get("editable_systems_df", None)
+stored_final_df = st.session_state.get("finalized_systems_df", None)
 
-    if stored_editor_df is not None:
-        renamed_systems_df = finalize_user_systems_table(
-            stored_editor_df,
-            solvent_names=solvent_names,
-            total_volume_ml=total_volume_ml
-        )
-    else:
-        renamed_systems_df = finalize_user_systems_table(
-            default_editor_df,
-            solvent_names=solvent_names,
-            total_volume_ml=total_volume_ml
-        )
+if stored_final_df is not None:
+    renamed_systems_df = stored_final_df.copy()
+else:
+    renamed_systems_df = finalize_user_systems_table(
+        default_editor_df,
+        solvent_names=solvent_names,
+        total_volume_ml=total_volume_ml
+    )
 
     phased_systems_df = expand_systems_to_phases(renamed_systems_df)
 
@@ -847,10 +843,10 @@ with tab2:
             """
 The app starts from a default 5-system proposal, but you can modify the solvent fractions manually.
 
-Rules:
-- edit only the fraction columns (`*_frac`)
-- each row will be automatically normalized to sum 1.0
-- mL and uL values will be recalculated from the selected total volume
+Recommended workflow:
+1. edit the fraction table
+2. click **Apply edited solvent systems**
+3. the app recalculates normalized fractions, mL, and uL
 """
         )
 
@@ -859,25 +855,55 @@ Rules:
     else:
         frac_cols_current = [f"{s}_frac" for s in solvent_names]
 
-        default_editor_df = renamed_systems_df[["System"] + frac_cols_current].copy()
+        # initial table shown to the user
+        if "editable_systems_df" not in st.session_state:
+            st.session_state["editable_systems_df"] = renamed_systems_df[["System"] + frac_cols_current].copy()
 
         st.markdown("### Editable solvent-system fractions")
 
         edited_systems_df = st.data_editor(
-            default_editor_df,
+            st.session_state["editable_systems_df"],
             use_container_width=True,
             num_rows="fixed",
             key="editable_systems_editor_tab2",
         )
 
-        edited_systems_df = edited_systems_df.copy()
-        st.session_state["editable_systems_df"] = edited_systems_df
+        c_apply, c_reset = st.columns(2)
 
-        finalized_systems_df = finalize_user_systems_table(
-            edited_systems_df,
-            solvent_names=solvent_names,
-            total_volume_ml=total_volume_ml
-        )
+        with c_apply:
+            if st.button("Apply edited solvent systems", key="apply_systems_tab2"):
+                st.session_state["editable_systems_df"] = edited_systems_df.copy()
+
+                finalized_systems_df = finalize_user_systems_table(
+                    edited_systems_df,
+                    solvent_names=solvent_names,
+                    total_volume_ml=total_volume_ml
+                )
+                st.session_state["finalized_systems_df"] = finalized_systems_df.copy()
+
+        with c_reset:
+            if st.button("Reset to default proposal", key="reset_systems_tab2"):
+                default_df = rename_solvent_columns(
+                    generate_five_systems(total_volume_ml=total_volume_ml),
+                    solvent_names
+                )[["System"] + frac_cols_current].copy()
+
+                st.session_state["editable_systems_df"] = default_df.copy()
+                st.session_state["finalized_systems_df"] = finalize_user_systems_table(
+                    default_df,
+                    solvent_names=solvent_names,
+                    total_volume_ml=total_volume_ml
+                )
+
+        finalized_systems_df = st.session_state.get("finalized_systems_df", None)
+
+        if finalized_systems_df is None:
+            finalized_systems_df = finalize_user_systems_table(
+                st.session_state["editable_systems_df"],
+                solvent_names=solvent_names,
+                total_volume_ml=total_volume_ml
+            )
+            st.session_state["finalized_systems_df"] = finalized_systems_df.copy()
 
         st.markdown("### Final solvent-system table")
         st.dataframe(finalized_systems_df, use_container_width=True)
