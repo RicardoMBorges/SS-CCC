@@ -1030,97 +1030,102 @@ Important:
     combined_tab6 = None
 
     if hplc_uploads_tab6:
-        parsed = {}
-        report_rows = []
-
         st.markdown("### Parsing debug")
 
-        for f in hplc_uploads_tab6:
+        # -----------------------------
+        # Case A: 3D PDA ASCII
+        # -----------------------------
+        if hplc_mode_tab6 == "3D PDA ASCII":
             try:
-                raw = f.getvalue()
+                combined_tab6 = import_uploaded_pda_files_with_dp(
+                    hplc_uploads_tab6,
+                    target_wavelength=float(target_wavelength_tab6)
+                )
 
-                if hplc_mode_tab6 == "3D PDA ASCII":
-                    df = parse_labsolutions_ascii(
-                        f.name,
-                        raw,
-                        target_wavelength=float(target_wavelength_tab6),
-                    )
-                    selected_wl = df.attrs.get("selected_wavelength_nm", np.nan)
-                    n_wl = df.attrs.get("n_wavelength_points", np.nan)
-                else:
-                    df = parse_labsolutions_ascii(f.name, raw)
-                    selected_wl = np.nan
-                    n_wl = np.nan
+                if combined_tab6 is None or combined_tab6.empty:
+                    st.error("No valid 3D tables were combined from the uploaded files.")
+                    st.stop()
 
-                # force numeric cleanup
-                df = df.copy()
-                df["RT(min)"] = pd.to_numeric(df["RT(min)"], errors="coerce")
-                sample_col = [c for c in df.columns if c != "RT(min)"][0]
-                df[sample_col] = pd.to_numeric(df[sample_col], errors="coerce")
-                df = df.dropna(subset=["RT(min)"]).reset_index(drop=True)
+                st.success(
+                    f"Built PDA matrix from {combined_tab6.shape[1] - 1} uploaded file(s) "
+                    f"at ≈{float(target_wavelength_tab6):.2f} nm"
+                )
 
-                parsed[f.name] = df
-
-                report_rows.append({
-                    "file": f.name,
-                    "status": "parsed",
-                    "rows": len(df),
-                    "rt_min": float(df["RT(min)"].min()) if len(df) else np.nan,
-                    "rt_max": float(df["RT(min)"].max()) if len(df) else np.nan,
-                    "signal_min": float(df[sample_col].min()) if len(df) else np.nan,
-                    "signal_max": float(df[sample_col].max()) if len(df) else np.nan,
-                    "selected_wavelength_nm": selected_wl,
-                    "n_wavelength_points": n_wl,
-                })
+                st.write("combined_tab6 is None:", combined_tab6 is None)
+                st.write("combined_tab6 shape:", combined_tab6.shape)
 
             except Exception as e:
-                report_rows.append({
-                    "file": f.name,
-                    "status": f"error: {e}",
-                    "rows": 0,
-                    "rt_min": np.nan,
-                    "rt_max": np.nan,
-                    "signal_min": np.nan,
-                    "signal_max": np.nan,
-                    "selected_wavelength_nm": np.nan,
-                    "n_wavelength_points": np.nan,
-                })
+                st.error(f"3D PDA import failed: {e}")
+                st.stop()
 
-        report_df = pd.DataFrame(report_rows)
+        # -----------------------------
+        # Case B: 2D ASCII
+        # -----------------------------
+        else:
+            parsed = {}
+            report_rows = []
 
-        with st.expander("Parsing report", expanded=True):
-            st.dataframe(report_df, use_container_width=True)
+            for f in hplc_uploads_tab6:
+                try:
+                    raw = f.getvalue()
+                    df = parse_labsolutions_ascii(f.name, raw)
 
-        n_parsed = int((report_df["status"] == "parsed").sum())
+                    df = df.copy()
+                    df["RT(min)"] = pd.to_numeric(df["RT(min)"], errors="coerce")
+                    sample_col = [c for c in df.columns if c != "RT(min)"][0]
+                    df[sample_col] = pd.to_numeric(df[sample_col], errors="coerce")
+                    df = df.dropna(subset=["RT(min)"]).reset_index(drop=True)
 
-        st.write("Number of successfully parsed files:", n_parsed)
-        st.write("Parsed dictionary keys:", list(parsed.keys()))
+                    parsed[f.name] = df
 
-        if n_parsed == 0:
-            st.error(
-                "No HPLC files were successfully parsed. Check the parsing report above."
-            )
-            st.stop()
+                    report_rows.append({
+                        "file": f.name,
+                        "status": "parsed",
+                        "rows": len(df),
+                        "rt_min": float(df["RT(min)"].min()) if len(df) else np.nan,
+                        "rt_max": float(df["RT(min)"].max()) if len(df) else np.nan,
+                        "signal_min": float(df[sample_col].min()) if len(df) else np.nan,
+                        "signal_max": float(df[sample_col].max()) if len(df) else np.nan,
+                    })
 
-        # show first parsed dataframe explicitly
-        first_key = next(iter(parsed.keys()))
-        st.write("First parsed file:", first_key)
-        with st.expander("First parsed dataframe preview", expanded=True):
-            st.dataframe(parsed[first_key].head(20), use_container_width=True)
+                except Exception as e:
+                    report_rows.append({
+                        "file": f.name,
+                        "status": f"error: {e}",
+                        "rows": 0,
+                        "rt_min": np.nan,
+                        "rt_max": np.nan,
+                        "signal_min": np.nan,
+                        "signal_max": np.nan,
+                    })
 
-        combined_tab6 = outer_join_rt(parsed)
+            report_df = pd.DataFrame(report_rows)
 
-        st.write("combined_tab6 is None:", combined_tab6 is None)
+            with st.expander("Parsing report", expanded=True):
+                st.dataframe(report_df, use_container_width=True)
 
-        if combined_tab6 is None:
-            st.error("combined_tab6 is None after outer_join_rt(parsed).")
-            st.stop()
+            n_parsed = int((report_df["status"] == "parsed").sum())
+            st.write("Number of successfully parsed files:", n_parsed)
+            st.write("Parsed dictionary keys:", list(parsed.keys()))
 
-        st.write("combined_tab6 shape:", combined_tab6.shape)
+            if n_parsed == 0:
+                st.error("No HPLC files were successfully parsed.")
+                st.stop()
 
-        if combined_tab6.empty:
-            st.error("combined_tab6 exists but is empty.")
-            st.stop()
+            combined_tab6 = outer_join_rt(parsed)
+
+            st.write("combined_tab6 is None:", combined_tab6 is None)
+
+            if combined_tab6 is None or combined_tab6.empty:
+                st.error("combined_tab6 could not be created from 2D uploads.")
+                st.stop()
+
+            st.write("combined_tab6 shape:", combined_tab6.shape)
+
+        # -----------------------------
+        # Common display
+        # -----------------------------
+        st.session_state["combined_tab6"] = combined_tab6.copy()
 
         with st.expander("Combined raw matrix", expanded=True):
             st.dataframe(combined_tab6.head(50), use_container_width=True)
