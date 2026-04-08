@@ -925,12 +925,9 @@ Workflow:
     meta_df_tab6 = None
     if meta_file_tab6 is not None:
         try:
-            meta_df_tab6 = pd.read_csv(meta_file_tab6, sep=";")
-        except Exception:
-            try:
-                meta_df_tab6 = smart_read_table(meta_file_tab6)
-            except Exception as e:
-                st.error(f"Failed to read metadata: {e}")
+            meta_df_tab6 = smart_read_table(meta_file_tab6)
+        except Exception as e:
+            st.error(f"Failed to read metadata: {e}")
 
     if meta_df_tab6 is not None:
         with st.expander("Metadata (head)", expanded=False):
@@ -939,12 +936,9 @@ Workflow:
     bio_df_tab6 = None
     if bio_file_tab6 is not None:
         try:
-            bio_df_tab6 = pd.read_csv(bio_file_tab6)
-        except Exception:
-            try:
-                bio_df_tab6 = smart_read_table(bio_file_tab6)
-            except Exception as e:
-                st.error(f"Failed to read bioactivity: {e}")
+            bio_df_tab6 = smart_read_table(bio_file_tab6)
+        except Exception as e:
+            st.error(f"Failed to read bioactivity: {e}")
 
     if bio_df_tab6 is not None:
         with st.expander("Bioactivity (head)", expanded=False):
@@ -991,8 +985,6 @@ Important:
 - do not use `.txt` in the mapping unless you use it consistently
 """
             )
-        else:
-            st.warning("Metadata should contain a BioActivity_filename column for STOCSY with bioactivity.")
 
     # -------------------------------------------------
     # 4) Parse HPLC uploads
@@ -1267,14 +1259,6 @@ of the UPDATED metadata file.
                 st.plotly_chart(fig_heat, use_container_width=True)
 
 
-            plot_df = df_aligned_tab6.melt(
-                id_vars="RT(min)",
-                var_name="Sample",
-                value_name="Intensity"
-            ).dropna(subset=["Intensity"])
-
-            t61, t62, t63 = st.tabs(["Overlay", "Stacked", "Heatmap"])
-
             with t61:
                 fig_overlay = px.line(
                     plot_df,
@@ -1372,7 +1356,7 @@ of the UPDATED metadata file.
             key="use_bio_driver_tab6",
         )
 
-        if use_bio_driver and col_sample and col_hplc and col_bio:
+        if use_bio_driver and all(c in meta_df_tab6.columns for c in [col_sample, col_hplc, col_bio]):
             try:
                 LC = df_aligned_tab6.drop(columns="RT(min)")
                 RT = df_aligned_tab6["RT(min)"]
@@ -1554,8 +1538,7 @@ This is safer than relying on an external metadata file, because the pairing log
 is already encoded by the metadata generated inside `ss_ccc`.
 """
             )
-
-    processed_hplc_df = st.session_state.get("tab6_preprocessed_df", None)
+    processed_hplc_df = st.session_state.get("tab6_aligned_df", None)
 
     if processed_hplc_df is None or processed_hplc_df.empty:
         st.info("First load and process HPLC data in tab 6.")
@@ -1674,7 +1657,7 @@ is already encoded by the metadata generated inside `ss_ccc`.
 
             st.markdown("### 4. Metadata integration")
 
-            metadata_editor_df = metadata_df.copy()
+            metadata_editor_df = st.session_state.get("uploaded_metadata_tab6", metadata_df.copy()).copy()
             metadata_editor_df["HPLC_filename"] = metadata_editor_df["HPLC_filename"].fillna("")
 
             edited_meta = st.data_editor(
