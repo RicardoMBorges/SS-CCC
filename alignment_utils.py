@@ -226,7 +226,7 @@ def alignment_controls(df: pd.DataFrame, sample_names: list[str] | None = None):
     if st is None:
         raise RuntimeError("alignment_controls requires Streamlit")
 
-    method = st.selectbox("Alignment method", ["None", "Icoshift", "PAFFT", "RAFFT"], index=1)
+    method = st.selectbox("Alignment method", ["None", "Icoshift", "PAFFT", "RAFFT"], index=2)
 
     params = {}
     if method == "Icoshift":
