@@ -1606,16 +1606,24 @@ Important:
                 samples_ok = []
                 hplc_cols_needed = []
                 bio_cols_needed = []
+                stocsy_labels = []
 
                 for _, row in meta_tmp.iterrows():
-                    sample_name = row[col_sample]
-                    hplc_name = row[col_hplc]
-                    bio_name = row[col_bio]
+                    sample_name = str(row[col_sample]).strip()
+                    hplc_name = str(row[col_hplc]).strip()
+                    bio_name = str(row[col_bio]).strip()
+
+                    # Use ATTRIBUTE_CCC as the unique label for STOCSY columns
+                    if "ATTRIBUTE_CCC" in row.index:
+                        stocsy_label = str(row["ATTRIBUTE_CCC"]).strip()
+                    else:
+                        stocsy_label = hplc_name
 
                     if (hplc_name in hplc_columns) and (bio_name in bio_cols):
                         samples_ok.append(sample_name)
                         hplc_cols_needed.append(hplc_name)
                         bio_cols_needed.append(bio_name)
+                        stocsy_labels.append(stocsy_label)
 
                 if len(samples_ok) == 0:
                     st.error(
@@ -1627,7 +1635,7 @@ Important:
                     # Reorder HPLC matrix by metadata mapping
                     # -----------------------------
                     LC_ord = LC[hplc_cols_needed].copy()
-                    LC_ord.columns = samples_ok
+                    LC_ord.columns = stocsy_labels
 
                     # -----------------------------
                     # Pick one numeric bioactivity row
@@ -1652,14 +1660,13 @@ Important:
                         )
                         picked = vals.values.astype(float)
                         picked_row_idx = 0
-
+                        
                     BioActdata = pd.DataFrame([picked], columns=bio_cols_needed)
                     BioActdata.rename(
-                        columns={old: new for old, new in zip(bio_cols_needed, samples_ok)},
+                        columns={old: new for old, new in zip(bio_cols_needed, stocsy_labels)},
                         inplace=True
                     )
-                    BioActdata = BioActdata[samples_ok]
-
+                    BioActdata = BioActdata[stocsy_labels]
                     # -----------------------------
                     # Merge HPLC + BioActivity
                     # -----------------------------
@@ -1677,6 +1684,7 @@ Important:
                     with st.expander("STOCSY mapping diagnostics", expanded=False):
                         diag_df = pd.DataFrame({
                             "sample_id": samples_ok,
+                            "STOCSY_label": stocsy_labels,
                             "HPLC_filename_used": hplc_cols_needed,
                             "BioActivity_filename_used": bio_cols_needed,
                         })
