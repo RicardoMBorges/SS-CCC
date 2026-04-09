@@ -323,7 +323,7 @@ def finalize_user_systems_table(df_systems: pd.DataFrame, solvent_names: List[st
 
     for s in solvent_names:
         df[f"{s}_mL"] = df[f"{s}_frac"] * float(total_volume_ml)
-        #df[f"{s}_uL"] = df[f"{s}_mL"] * 1000.0
+        df[f"{s}_uL"] = df[f"{s}_mL"] * 1000.0
 
     df["Total_mL"] = float(total_volume_ml)
     return df
