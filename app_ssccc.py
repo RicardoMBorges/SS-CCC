@@ -65,6 +65,12 @@ try:
 except FileNotFoundError:
     st.sidebar.warning("Logo not found at static/LAABio.png")
 
+st.sidebar.markdown("#### Preparation of Extract Aliquots")
+
+st.sidebar.link_button(
+    "📖 Protocol",
+    "https://github.com/RicardoMBorges/SS-CCC/blob/main/Preparation_of_Extract_Aliquots_for_Differential_Liquid%E2%80%93Liquid_Partitioning.md"
+)
 
 # =========================================================
 # HELPERS
